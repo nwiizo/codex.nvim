@@ -95,6 +95,17 @@ function M.range(bufnr, start_line, end_line, working_directory, limits)
   return format_selection(bufnr, working_directory, start_line, end_line, lines, limits)
 end
 
+---@param column integer
+---@return integer
+local function getregion_column(column)
+  -- Buffer marks use zero-based columns, while getregion() uses one-based columns.
+  -- v:maxcol is an end-of-line sentinel rather than a byte index, so preserve it.
+  if column == vim.v.maxcol then
+    return column
+  end
+  return column + 1
+end
+
 ---@param bufnr integer
 ---@param start_pos integer[]
 ---@param end_pos integer[]
@@ -107,8 +118,8 @@ function M._selection_text(bufnr, start_pos, end_pos, mode, exclusive)
   local first_line = math.min(start_pos[1], end_pos[1])
   local last_line = math.max(start_pos[1], end_pos[1])
   local positions = {
-    { bufnr, start_pos[1], start_pos[2] + 1, 0 },
-    { bufnr, end_pos[1], end_pos[2] + 1, 0 },
+    { bufnr, start_pos[1], getregion_column(start_pos[2]), 0 },
+    { bufnr, end_pos[1], getregion_column(end_pos[2]), 0 },
   }
   local lines = vim.fn.getregion(positions[1], positions[2], {
     type = mode,

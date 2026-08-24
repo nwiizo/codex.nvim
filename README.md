@@ -65,6 +65,7 @@ With lazy.nvim:
     "CodexPrompt",
     "CodexSend",
     "CodexSendVisual",
+    "CodexAddVisual",
     "CodexAdd",
     "CodexTreeAdd",
     "CodexDiff",
@@ -94,6 +95,13 @@ Add the current file to the composer without submitting:
 :CodexAdd
 ```
 
+Insert an exact visual selection without submitting, then finish the prompt
+inside Codex:
+
+```vim
+:'<,'>CodexAddVisual
+```
+
 Send an exact visual selection:
 
 ```vim
@@ -113,8 +121,14 @@ keys = {
   { "<leader>ax", "<cmd>CodexFocus<cr>", desc = "Focus or hide Codex" },
   { "<leader>ab", "<cmd>CodexAdd<cr>", desc = "Add current buffer to Codex" },
   {
+    "<leader>aa",
+    ":<C-U>CodexAddVisual<CR>",
+    mode = "v",
+    desc = "Add selection to Codex prompt",
+  },
+  {
     "<leader>as",
-    "<cmd>CodexSendVisual<cr>",
+    ":<C-U>CodexSendVisual<CR>",
     mode = "v",
     desc = "Send selection to Codex",
   },
@@ -130,6 +144,11 @@ keys = {
 | Already focused | Hide it without stopping the process |
 | Not running | Start and focus a new session |
 
+Prompt and context commands also start the selected backend when it is not
+running. Terminal input stays queued until Codex exposes its composer, so an
+upgrade or onboarding screen cannot consume it. Cold starts honor
+`focus_after_send` while the session starts.
+
 Hiding the panel from inside it restores the most recent non-Codex window when
 that window still exists.
 
@@ -137,6 +156,12 @@ Inside the terminal, `Alt-h`, `Alt-j`, `Alt-k`, and `Alt-l` leave terminal mode
 and move to the neighboring Neovim window.
 If your terminal emulator does not send Option/Alt as Meta, configure different
 keys with `terminal.window_navigation`.
+
+Neovim sends keys typed in terminal mode to Codex, including `Esc`. Use
+`Ctrl-\` followed by `Ctrl-n` to enter Neovim's terminal Normal mode, then use
+`v`, `V`, or `Ctrl-v` to select terminal text and `i` to return to Codex. Set
+`terminal.normal_mode_keys` for a shorter buffer-local mapping. Avoid mapping
+`Esc`, because Codex uses it to cancel UI states and interrupt or backtrack.
 
 ## Commands
 
@@ -155,6 +180,7 @@ keys with `terminal.window_navigation`.
 | `:CodexPrompt [text]` | Prompt Codex, using `vim.ui.input` when text is omitted |
 | `:[range]CodexSend` | Send complete lines with file and range context |
 | `:'<,'>CodexSendVisual` | Send the exact visual selection |
+| `:'<,'>CodexAddVisual` | Insert the exact visual selection without submitting |
 | `:CodexAdd [path]` | Insert an `@path` reference without submitting |
 | `:[range]CodexTreeAdd` | Insert selected explorer paths without submitting |
 | `:CodexSendText[!] {text}` | Send and submit text; bang only inserts it |
@@ -183,10 +209,18 @@ require("codex").setup({
   focus_after_send = false, -- applies to both backends
 
   terminal = {
+    layout = "split", -- "split" or "float"
     split_side = "right",
     split_width_percentage = 0.35,
+    float = {
+      width_percentage = 0.85,
+      height_percentage = 0.85,
+      border = "rounded",
+    },
     auto_insert = true,
     auto_close = true,
+    hide_keys = {}, -- terminal-local keys that hide Codex
+    normal_mode_keys = {}, -- terminal-local keys that enter Neovim Normal mode
     window_navigation = {
       left = "<M-h>",
       down = "<M-j>",
@@ -220,6 +254,36 @@ list sessions from the same profile.
 
 Set `terminal.window_navigation = false` to disable all four terminal-local
 mappings.
+
+For example, use `Alt-n` to enter Neovim's terminal Normal mode without taking
+`Esc` away from Codex:
+
+```lua
+terminal = {
+  normal_mode_keys = { "<M-n>" },
+}
+```
+
+The mappings are local to the Codex terminal buffer. Once in Normal mode, use
+`v`, `V`, or `Ctrl-v` for Visual mode and `i` or `a` to return to terminal mode.
+
+For a centered floating Codex TUI with terminal-local hide keys:
+
+```lua
+terminal = {
+  layout = "float",
+  float = {
+    width_percentage = 0.85,
+    height_percentage = 0.85,
+    border = "rounded",
+  },
+  hide_keys = { "<C-/>", "<C-_>" },
+}
+```
+
+The hide mappings are buffer-local, so the same keys keep their existing
+behavior in editor and other terminal buffers. `<C-/>` and `<C-_>` cover the
+two encodings commonly produced for Ctrl-/ by terminals and multiplexers.
 
 ### Working directory policy
 
@@ -257,10 +321,10 @@ restarting from a different file or root.
 
 The terminal backend runs the complete interactive Codex TUI. It is the
 recommended default because Codex owns the conversation UI and approval flow.
-Closing the split only hides its buffer; `:CodexStop` stops the process.
-The split side and width under `terminal` are also reused by the app-server
-panel. Argument-free resume/fork pickers depend on app-server; pass a session ID
-to run those terminal commands without the picker protocol.
+Closing its split or float only hides the buffer; `:CodexStop` stops the
+process. The split side and width under `terminal` are also reused by the
+app-server panel. Argument-free resume/fork pickers depend on app-server; pass a
+session ID to run those terminal commands without the picker protocol.
 
 ### App-server (experimental)
 

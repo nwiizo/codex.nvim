@@ -72,6 +72,10 @@ vim.api.nvim_create_user_command("CodexSendVisual", function()
   codex().send_visual()
 end, { range = true, desc = "Send the exact visual selection to Codex" })
 
+vim.api.nvim_create_user_command("CodexAddVisual", function()
+  codex().add_visual()
+end, { range = true, desc = "Insert the exact visual selection without submitting" })
+
 vim.api.nvim_create_user_command("CodexAdd", function(opts)
   codex().add(opts.args ~= "" and opts.args or nil)
 end, { nargs = "?", complete = "file", desc = "Insert a file reference into the Codex composer" })

@@ -24,6 +24,7 @@ h.test("plugin registers commands without loading the core module", function()
     "CodexInterrupt",
     "CodexSend",
     "CodexSendVisual",
+    "CodexAddVisual",
     "CodexAdd",
     "CodexTreeAdd",
     "CodexSendText",

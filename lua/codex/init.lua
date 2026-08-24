@@ -60,22 +60,25 @@ end
 ---@param metadata CodexNvimContextMetadata|string
 ---@param kind "file"|"range"|"visual"
 ---@param cwd string
+---@param submit? boolean
 ---@return boolean
-local function send_context(prompt, metadata, kind, cwd)
+local function send_context(prompt, metadata, kind, cwd, submit)
   if not prompt then
     notify(tostring(metadata), vim.log.levels.ERROR)
     return false
   end
+  local submitted = submit ~= false
   ---@cast metadata CodexNvimContextMetadata
   ---@type CodexNvimSingleContextReceipt
   local receipt = vim.tbl_extend("force", vim.deepcopy(metadata), {
     kind = kind,
     cwd = cwd,
     source = kind,
-    submitted = true,
+    submitted = submitted,
   })
   local completed = false
-  local sent = backend().send(prompt, {
+  local sent = backend().send(submitted and prompt or (prompt .. "\n\n"), {
+    submit = submitted,
     on_complete = function(ok)
       if ok and not completed then
         completed = true
@@ -281,6 +284,17 @@ function M.send_visual(bufnr)
   end
   local prompt, metadata = require("codex.context").visual(bufnr or 0, cwd, config().context)
   return send_context(prompt, metadata, "visual", cwd)
+end
+
+---@param bufnr? integer
+---@return boolean
+function M.add_visual(bufnr)
+  local cwd = working_directory()
+  if not cwd then
+    return false
+  end
+  local prompt, metadata = require("codex.context").visual(bufnr or 0, cwd, config().context)
+  return send_context(prompt, metadata, "visual", cwd, false)
 end
 
 ---@param path? string

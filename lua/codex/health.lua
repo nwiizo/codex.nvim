@@ -53,6 +53,19 @@ function M.check()
     health.error("Working directory cannot be resolved: " .. tostring(cwd_error))
   end
 
+  health.info("Terminal layout: " .. config.terminal.layout)
+  if #config.terminal.hide_keys == 0 then
+    health.info("Terminal hide keys are disabled")
+  else
+    health.ok("Terminal hide keys: " .. table.concat(config.terminal.hide_keys, "/"))
+  end
+
+  if #config.terminal.normal_mode_keys == 0 then
+    health.info("Terminal Normal-mode keys are disabled")
+  else
+    health.ok("Terminal Normal-mode keys: " .. table.concat(config.terminal.normal_mode_keys, "/"))
+  end
+
   local navigation = config.terminal.window_navigation
   if navigation == false then
     health.info("Terminal window navigation is disabled")

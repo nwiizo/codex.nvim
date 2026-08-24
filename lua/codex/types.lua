@@ -1,6 +1,8 @@
 ---@meta
 
 ---@alias CodexNvimSplitSide "left"|"right"
+---@alias CodexNvimTerminalLayout "split"|"float"
+---@alias CodexNvimFloatBorder "none"|"single"|"double"|"rounded"|"solid"|"shadow"
 ---@alias CodexNvimBackend "terminal"|"app_server"
 ---@alias CodexNvimCwdPolicy "root"|"file"|"nvim"|string|fun(ctx: CodexNvimCwdContext): string?
 
@@ -16,11 +18,20 @@
 ---@field up? string
 ---@field right? string
 
+---@class (exact) CodexNvimTerminalFloatOptions
+---@field width_percentage? number
+---@field height_percentage? number
+---@field border? CodexNvimFloatBorder
+
 ---@class (exact) CodexNvimTerminalOptions
+---@field layout? CodexNvimTerminalLayout
 ---@field split_side? CodexNvimSplitSide
 ---@field split_width_percentage? number
+---@field float? CodexNvimTerminalFloatOptions
 ---@field auto_insert? boolean
 ---@field auto_close? boolean
+---@field hide_keys? string[]
+---@field normal_mode_keys? string[]
 ---@field window_navigation? false|CodexNvimWindowNavigation
 
 ---@class (exact) CodexNvimContextOptions
@@ -38,11 +49,20 @@
 ---@field context? CodexNvimContextOptions
 ---@field app_server? { cmd?: string[] }
 
+---@class (exact) CodexNvimTerminalFloatConfig
+---@field width_percentage number
+---@field height_percentage number
+---@field border CodexNvimFloatBorder
+
 ---@class (exact) CodexNvimTerminalConfig
+---@field layout CodexNvimTerminalLayout
 ---@field split_side CodexNvimSplitSide
 ---@field split_width_percentage number
+---@field float CodexNvimTerminalFloatConfig
 ---@field auto_insert boolean
 ---@field auto_close boolean
+---@field hide_keys string[]
+---@field normal_mode_keys string[]
 ---@field window_navigation false|CodexNvimWindowNavigation
 
 ---@class (exact) CodexNvimContextConfig

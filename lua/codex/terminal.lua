@@ -2,6 +2,15 @@ local M = {}
 
 local window = require("codex.window")
 
+local composer_cursor_pattern = "\27%[[0-9; ]+ q\27%[%?25h"
+-- Keep enough overlap to match the cursor sequence across stdout chunks.
+local output_tail_length = 32
+local composer_wait_warning_ms = 5000
+
+---@class (exact) CodexNvimPendingSend
+---@field text string
+---@field opts CodexNvimSendOptions
+
 ---@class (exact) CodexNvimTerminalState
 ---@field bufnr? integer
 ---@field winid? integer
@@ -10,6 +19,12 @@ local window = require("codex.window")
 ---@field argv? string[]
 ---@field close_on_exit? boolean
 ---@field return_winid? integer
+---@field resize_group? integer
+---@field pending_sends CodexNvimPendingSend[]
+---@field composer_ready boolean
+---@field waiting_for_composer boolean
+---@field delivery_scheduled boolean
+---@field output_tail string
 
 ---@type CodexNvimTerminalState
 local state = {
@@ -20,7 +35,16 @@ local state = {
   argv = nil,
   close_on_exit = nil,
   return_winid = nil,
+  resize_group = nil,
+  pending_sends = {},
+  composer_ready = false,
+  waiting_for_composer = false,
+  delivery_scheduled = false,
+  output_tail = "",
 }
+
+---@type fun(text: string, opts: CodexNvimSendOptions): boolean
+local send_now
 
 ---@return CodexNvimConfig
 local function config()
@@ -67,9 +91,37 @@ local function find_window()
   return nil
 end
 
+---@param winid integer
+local function configure_window(winid)
+  vim.wo[winid].number = false
+  vim.wo[winid].relativenumber = false
+  vim.wo[winid].signcolumn = "no"
+end
+
+---@return table
+local function float_window_config()
+  local terminal_config = config().terminal
+  local available_width = math.max(1, vim.o.columns)
+  local available_height = math.max(1, vim.o.lines - vim.o.cmdheight)
+  local max_width = math.max(1, available_width - 2)
+  local max_height = math.max(1, available_height - 2)
+  local width = math.min(max_width, math.max(1, math.floor(available_width * terminal_config.float.width_percentage)))
+  local height =
+    math.min(max_height, math.max(1, math.floor(available_height * terminal_config.float.height_percentage)))
+  return {
+    relative = "editor",
+    row = math.max(0, math.floor((available_height - height) / 2)),
+    col = math.max(0, math.floor((available_width - width) / 2)),
+    width = width,
+    height = height,
+    style = "minimal",
+    border = terminal_config.float.border,
+  }
+end
+
 ---@param bufnr integer
 ---@return integer
-local function open_split(bufnr)
+local function open_window(bufnr)
   local terminal_config = config().terminal
   local width = math.max(1, math.floor(vim.o.columns * terminal_config.split_width_percentage))
   local modifier = terminal_config.split_side == "left" and "topleft" or "botright"
@@ -80,12 +132,15 @@ local function open_split(bufnr)
   end
 
   local ok, winid_or_error = pcall(function()
-    vim.cmd(string.format("%s %dvsplit", modifier, width))
-    local winid = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(winid, bufnr)
-    vim.wo[winid].number = false
-    vim.wo[winid].relativenumber = false
-    vim.wo[winid].signcolumn = "no"
+    local winid
+    if terminal_config.layout == "float" then
+      winid = vim.api.nvim_open_win(bufnr, true, float_window_config())
+    else
+      vim.cmd(string.format("%s %dvsplit", modifier, width))
+      winid = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_buf(winid, bufnr)
+    end
+    configure_window(winid)
     return winid
   end)
   if not ok then
@@ -105,8 +160,8 @@ end
 ---@param bufnr integer
 ---@return integer? winid
 ---@return unknown? error
-local function try_open_split(bufnr)
-  local ok, winid_or_error = pcall(open_split, bufnr)
+local function try_open_window(bufnr)
+  local ok, winid_or_error = pcall(open_window, bufnr)
   if not ok then
     return nil, winid_or_error
   end
@@ -142,7 +197,119 @@ local function setup_window_navigation(bufnr)
   end
 end
 
+---@param bufnr integer
+local function setup_normal_mode_keys(bufnr)
+  for _, key in ipairs(config().terminal.normal_mode_keys) do
+    vim.keymap.set("t", key, "<C-\\><C-n>", {
+      buf = bufnr,
+      desc = "Enter terminal Normal mode",
+      silent = true,
+    })
+  end
+end
+
+---@param bufnr integer
+local function setup_hide_keys(bufnr)
+  for _, key in ipairs(config().terminal.hide_keys) do
+    vim.keymap.set("t", key, "<C-\\><C-n><Cmd>lua require('codex.terminal').hide()<CR>", {
+      buf = bufnr,
+      desc = "Hide Codex terminal",
+      silent = true,
+    })
+  end
+end
+
+---@param bufnr integer
+local function setup_float_resize(bufnr)
+  if config().terminal.layout ~= "float" then
+    return
+  end
+  local group = vim.api.nvim_create_augroup("codex_nvim_terminal_resize", { clear = true })
+  state.resize_group = group
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = group,
+    callback = function()
+      if state.bufnr ~= bufnr or not valid_buffer() then
+        return
+      end
+      local winid = find_window()
+      if not winid or config().terminal.layout ~= "float" then
+        return
+      end
+      local win_config = vim.api.nvim_win_get_config(winid)
+      if win_config.relative ~= "" then
+        pcall(vim.api.nvim_win_set_config, winid, float_window_config())
+      end
+    end,
+  })
+end
+
+---@param opts CodexNvimSendOptions
+---@param ok boolean
+local function complete_send(opts, ok)
+  if opts.on_complete then
+    pcall(opts.on_complete, ok)
+  end
+end
+
+---@param data string[]
+---@return boolean
+local function output_has_composer_cursor(data)
+  local output = state.output_tail .. table.concat(data or {}, "\n")
+  state.output_tail = output:sub(math.max(1, #output - output_tail_length + 1))
+  -- Codex sets the cursor style and shows it only after rendering an editable
+  -- composer. Startup selectors keep the terminal cursor hidden.
+  return output:find(composer_cursor_pattern) ~= nil
+end
+
+---@param jobid integer
+local function schedule_composer_wait_warning(jobid)
+  vim.defer_fn(function()
+    if state.jobid == jobid and state.waiting_for_composer and #state.pending_sends > 0 then
+      notify(
+        "terminal input is still queued; finish any Codex startup prompt to make the composer ready",
+        vim.log.levels.WARN
+      )
+    end
+  end, composer_wait_warning_ms)
+end
+
+---@param output_jobid integer
+---@param data string[]
+local function handle_output(output_jobid, data)
+  if state.jobid and state.jobid ~= output_jobid then
+    return
+  end
+  if state.composer_ready or not output_has_composer_cursor(data) then
+    return
+  end
+
+  state.composer_ready = true
+  if not state.waiting_for_composer then
+    return
+  end
+  state.waiting_for_composer = false
+  state.delivery_scheduled = true
+  vim.schedule(function()
+    if state.jobid ~= output_jobid or not M.is_running() then
+      return
+    end
+    local pending_sends = state.pending_sends
+    state.pending_sends = {}
+    state.delivery_scheduled = false
+    for _, pending in ipairs(pending_sends) do
+      if not send_now(pending.text, pending.opts) then
+        complete_send(pending.opts, false)
+      end
+    end
+  end)
+end
+
 local function clear_state()
+  local pending_sends = state.pending_sends
+  if state.resize_group then
+    pcall(vim.api.nvim_del_augroup_by_id, state.resize_group)
+  end
   state.bufnr = nil
   state.winid = nil
   state.jobid = nil
@@ -150,6 +317,15 @@ local function clear_state()
   state.argv = nil
   state.close_on_exit = nil
   state.return_winid = nil
+  state.resize_group = nil
+  state.pending_sends = {}
+  state.composer_ready = false
+  state.waiting_for_composer = false
+  state.delivery_scheduled = false
+  state.output_tail = ""
+  for _, pending in ipairs(pending_sends) do
+    complete_send(pending.opts, false)
+  end
 end
 
 ---@param bufnr integer
@@ -174,6 +350,9 @@ local function handle_exit(exited_jobid, exit_code)
     local close_on_exit = state.close_on_exit ~= false
     local return_winid = state.return_winid
     local restore_focus = exited_bufnr ~= nil and vim.api.nvim_win_get_buf(0) == exited_bufnr
+    if #state.pending_sends > 0 then
+      notify("queued terminal input was not delivered before Codex exited", vim.log.levels.WARN)
+    end
     clear_state()
     if close_on_exit and config().terminal.auto_close and exited_bufnr and vim.api.nvim_buf_is_valid(exited_bufnr) then
       window.hide_buffer_windows(exited_bufnr)
@@ -223,10 +402,10 @@ function M.show(opts)
   local reopened = winid == nil
   if not winid then
     local original_win = vim.api.nvim_get_current_win()
-    local split_error
-    winid, split_error = try_open_split(state.bufnr)
+    local window_error
+    winid, window_error = try_open_window(state.bufnr)
     if not winid then
-      notify("could not open terminal split: " .. tostring(split_error), vim.log.levels.ERROR)
+      notify("could not open terminal window: " .. tostring(window_error), vim.log.levels.ERROR)
       return false
     end
     state.winid = winid
@@ -243,10 +422,10 @@ function M.show(opts)
   return true
 end
 
----@param opts? CodexNvimOpenOptions
+---@param opts CodexNvimOpenOptions
+---@param pending_send? CodexNvimPendingSend
 ---@return boolean
-function M.open(opts)
-  opts = opts or {}
+local function start(opts, pending_send)
   if M.is_running() then
     return M.show({ focus = opts.focus })
   end
@@ -261,17 +440,25 @@ function M.open(opts)
   local source_bufnr = vim.api.nvim_win_get_buf(original_win)
   local bufnr = vim.api.nvim_create_buf(false, true)
   state.bufnr = bufnr
-  local split_error
-  state.winid, split_error = try_open_split(bufnr)
+  state.pending_sends = pending_send and { pending_send } or {}
+  state.composer_ready = false
+  state.waiting_for_composer = pending_send ~= nil
+  state.delivery_scheduled = false
+  state.output_tail = ""
+  local window_error
+  state.winid, window_error = try_open_window(bufnr)
   if not state.winid then
     cleanup_failed_start(bufnr)
-    notify("could not open terminal split: " .. tostring(split_error), vim.log.levels.ERROR)
+    notify("could not open terminal window: " .. tostring(window_error), vim.log.levels.ERROR)
     return false
   end
   vim.bo[bufnr].bufhidden = "hide"
   vim.bo[bufnr].swapfile = false
   vim.b[bufnr].codex_nvim_terminal = true
   setup_window_navigation(bufnr)
+  setup_normal_mode_keys(bufnr)
+  setup_hide_keys(bufnr)
+  setup_float_resize(bufnr)
 
   local argv = opts.argv or M._build_argv(opts.subcommand, opts.args)
   local working_directory, cwd_error
@@ -296,6 +483,9 @@ function M.open(opts)
     on_exit = function(_, exit_code)
       handle_exit(jobid, exit_code)
     end,
+    on_stdout = function(output_jobid, data)
+      handle_output(output_jobid, data)
+    end,
   }
   if next(config().env) ~= nil then
     job_options.env = config().env
@@ -311,6 +501,9 @@ function M.open(opts)
   jobid = job_or_error
 
   state.jobid = jobid
+  if state.waiting_for_composer then
+    schedule_composer_wait_warning(jobid)
+  end
   if opts.focus == false and vim.api.nvim_win_is_valid(original_win) then
     vim.api.nvim_set_current_win(original_win)
   else
@@ -318,6 +511,12 @@ function M.open(opts)
   end
   emit("CodexStarted", M.status())
   return true
+end
+
+---@param opts? CodexNvimOpenOptions
+---@return boolean
+function M.open(opts)
+  return start(opts or {})
 end
 
 ---@return boolean
@@ -384,18 +583,9 @@ function M._encode(text)
 end
 
 ---@param text string
----@param opts? CodexNvimSendOptions
+---@param opts CodexNvimSendOptions
 ---@return boolean
-function M.send(text, opts)
-  opts = opts or {}
-  if type(text) ~= "string" or text == "" then
-    notify("cannot send empty text", vim.log.levels.WARN)
-    return false
-  end
-  if not M.is_running() then
-    notify("start Codex before sending context", vim.log.levels.WARN)
-    return false
-  end
+send_now = function(text, opts)
   local channel = valid_buffer() and vim.b[state.bufnr].terminal_job_id or nil
   if not channel or channel == 0 then
     channel = valid_buffer() and vim.bo[state.bufnr].channel or state.jobid
@@ -412,10 +602,34 @@ function M.send(text, opts)
   if config().focus_after_send then
     M.show({ focus = true })
   end
-  if opts.on_complete then
-    opts.on_complete(true)
-  end
+  complete_send(opts, true)
   return true
+end
+
+---@param text string
+---@param opts? CodexNvimSendOptions
+---@return boolean
+function M.send(text, opts)
+  opts = opts or {}
+  if type(text) ~= "string" or text == "" then
+    notify("cannot send empty text", vim.log.levels.WARN)
+    return false
+  end
+  if not M.is_running() then
+    return start({ focus = config().focus_after_send }, { text = text, opts = opts })
+  end
+  if not state.composer_ready or state.delivery_scheduled then
+    local started_waiting = not state.composer_ready and not state.waiting_for_composer
+    if not state.composer_ready then
+      state.waiting_for_composer = true
+    end
+    table.insert(state.pending_sends, { text = text, opts = opts })
+    if started_waiting then
+      schedule_composer_wait_warning(state.jobid)
+    end
+    return true
+  end
+  return send_now(text, opts)
 end
 
 ---@return CodexNvimStatus

@@ -1,5 +1,6 @@
 :Codex	codex.txt	/*:Codex*
 :CodexAdd	codex.txt	/*:CodexAdd*
+:CodexAddVisual	codex.txt	/*:CodexAddVisual*
 :CodexClose	codex.txt	/*:CodexClose*
 :CodexContinue	codex.txt	/*:CodexContinue*
 :CodexDiff	codex.txt	/*:CodexDiff*

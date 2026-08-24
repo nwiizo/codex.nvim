@@ -16,7 +16,7 @@ CONTENTS                                                     *codex-contents*
 codex.nvim is an unofficial, dependency-free integration for the OpenAI Codex
 CLI. It requires Neovim 0.12 or newer and a `codex` executable on $PATH.
 
-The default backend runs the complete Codex TUI in a terminal split. The
+The default backend runs the complete Codex TUI in a terminal window. The
 experimental app-server backend renders streamed turns, approvals, and diffs
 with native Neovim UI.
 
@@ -33,10 +33,18 @@ The defaults are equivalent to: >lua
     root_markers = { ".git" },
     focus_after_send = false,
     terminal = {
+      layout = "split",
       split_side = "right",
       split_width_percentage = 0.35,
+      float = {
+        width_percentage = 0.85,
+        height_percentage = 0.85,
+        border = "rounded",
+      },
       auto_insert = true,
       auto_close = true,
+      hide_keys = {},
+      normal_mode_keys = {},
       window_navigation = {
         left = "<M-h>",
         down = "<M-j>",
@@ -57,6 +65,28 @@ The defaults are equivalent to: >lua
 Set `terminal.window_navigation = false` to disable the terminal-local window
 movement mappings.
 
+Neovim terminal mode forwards `Esc` to Codex. Use <C-\><C-n> to enter
+terminal Normal mode, then `v`, `V`, or `Ctrl-v` to select text and `i` or `a`
+to return to terminal mode. `terminal.normal_mode_keys` installs shorter
+buffer-local mappings without taking `Esc` away from Codex: >lua
+
+  terminal = {
+    normal_mode_keys = { "<M-n>" },
+  }
+<
+
+Use `terminal.layout = "float"` for a centered floating TUI. Its size and
+border are controlled by `terminal.float`. `terminal.hide_keys` installs
+buffer-local terminal mappings that hide Codex and restore the editor. For
+Ctrl-/ across terminal encodings: >lua
+
+  terminal = {
+    layout = "float",
+    hide_keys = { "<C-/>", "<C-_>" },
+  }
+<
+These keys retain their existing behavior outside the Codex terminal buffer.
+
 ==============================================================================
 3. Commands                                                  *codex-commands*
 
@@ -72,6 +102,11 @@ movement mappings.
                                                         *:CodexFocus*
 :CodexFocus            Start, reveal, or focus Codex. Hide it when it already
                        has focus.
+
+Prompt and context commands start the selected backend when it is not running.
+Terminal input stays queued until Codex exposes its composer, so startup
+screens cannot consume it. Cold starts honor `focus_after_send` while the
+session starts.
 
                                                         *:CodexStop*
 :CodexStop             Stop the managed Codex process.
@@ -107,6 +142,11 @@ movement mappings.
 
                                                         *:CodexSendVisual*
 :'<,'>CodexSendVisual  Send an exact character, line, or block selection.
+
+                                                        *:CodexAddVisual*
+:'<,'>CodexAddVisual   Insert an exact character, line, or block selection
+                       without submitting, so the prompt can be completed in
+                       Codex first.
 
                                                         *:CodexAdd*
 :CodexAdd [path]       Insert an @path reference without submitting.
@@ -153,8 +193,9 @@ fixed for that session.
 TERMINAL BACKEND                                      *codex-backend-terminal*
 
 The default and recommended backend. It runs the complete interactive Codex
-TUI. Hiding its split preserves the terminal process. Argument-free resume and
-fork pickers use app-server; provide a session ID for a CLI-only path.
+TUI. Hiding its split or float preserves the terminal process. Argument-free
+resume and fork pickers use app-server; provide a session ID for a CLI-only
+path.
 
 APP-SERVER BACKEND                                  *codex-backend-app-server*
 

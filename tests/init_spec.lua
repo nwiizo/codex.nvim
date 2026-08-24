@@ -87,6 +87,7 @@ end)
 h.test("range sends record a submitted context receipt", function()
   codex._reset()
   local sent
+  local sent_opts
   local original_terminal = package.loaded["codex.terminal"]
   package.loaded["codex.terminal"] = {
     status = function()
@@ -94,6 +95,7 @@ h.test("range sends record a submitted context receipt", function()
     end,
     send = function(text, opts)
       sent = text
+      sent_opts = opts
       if opts.on_complete then
         opts.on_complete(true)
       end
@@ -111,6 +113,7 @@ h.test("range sends record a submitted context receipt", function()
   package.loaded["codex.terminal"] = original_terminal
   vim.api.nvim_buf_delete(bufnr, { force = true })
   h.contains(sent, "lines 1-2")
+  h.eq(true, sent_opts.submit)
   local receipt = status.last_context
   h.truthy(receipt)
   ---@cast receipt CodexNvimContextReceipt
@@ -118,6 +121,62 @@ h.test("range sends record a submitted context receipt", function()
   h.eq("context-receipt.lua", receipt.file_path)
   h.eq(true, receipt.submitted)
   codex._reset()
+end)
+
+h.test("add_visual inserts exact selection without submitting", function()
+  codex._reset()
+  local sent
+  local original_buf = vim.api.nvim_get_current_buf()
+  local original_terminal = package.loaded["codex.terminal"]
+  local bufnr = vim.api.nvim_create_buf(true, false)
+  local ok, err = xpcall(function()
+    vim.api.nvim_buf_set_name(bufnr, "/tmp/visual-draft.lua")
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "local one = 1", "local two = 2" })
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.cmd("normal! gg06lvj2l")
+    vim.api.nvim_feedkeys(vim.keycode("<Esc>"), "nx", false)
+
+    package.loaded["codex.terminal"] = {
+      status = function()
+        return { backend = "terminal", cwd = "/tmp", running = true, visible = true, jobid = 45 }
+      end,
+      send = function(text, opts)
+        sent = { text = text, opts = opts }
+        if opts.on_complete then
+          opts.on_complete(true)
+        end
+        return true
+      end,
+    }
+    config.setup({ cwd = "nvim" })
+
+    h.truthy(codex.add_visual(bufnr))
+    local status = codex.status()
+
+    h.contains(sent.text, "one = 1")
+    h.contains(sent.text, "local two")
+    h.eq("\n\n", sent.text:sub(-2))
+    h.eq(false, sent.opts.submit)
+    local receipt = status.last_context
+    h.truthy(receipt)
+    ---@cast receipt CodexNvimContextReceipt
+    h.eq("visual", receipt.kind)
+    h.eq("visual-draft.lua", receipt.file_path)
+    h.eq(false, receipt.submitted)
+    h.contains(codex.status_message(status), "inserted")
+  end, debug.traceback)
+
+  if vim.api.nvim_buf_is_valid(original_buf) then
+    vim.api.nvim_set_current_buf(original_buf)
+  end
+  package.loaded["codex.terminal"] = original_terminal
+  if vim.api.nvim_buf_is_valid(bufnr) then
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end
+  codex._reset()
+  if not ok then
+    error(err, 0)
+  end
 end)
 
 h.test("failed context delivery does not record a receipt", function()

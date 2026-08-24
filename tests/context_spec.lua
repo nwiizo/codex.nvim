@@ -31,6 +31,30 @@ h.test("characterwise selection keeps exact edge columns", function()
   vim.api.nvim_buf_delete(bufnr, { force = true })
 end)
 
+h.test("linewise visual selection keeps complete lines", function()
+  local original_bufnr = vim.api.nvim_get_current_buf()
+  local bufnr, filename = buffer({ "use alpha;", "use beta;", "fn main() {}" })
+  local ok, err = xpcall(function()
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.cmd([[execute "normal! ggV2j\<Esc>"]])
+
+    local end_pos = vim.api.nvim_buf_get_mark(bufnr, ">")
+    h.eq(vim.v.maxcol, end_pos[2])
+
+    local prompt, metadata = context.visual(bufnr, "/tmp", limits)
+    h.contains(prompt, "@" .. filename .. " (lines 1-3)")
+    h.contains(prompt, "```rust\nuse alpha;\nuse beta;\nfn main() {}\n```")
+    h.eq(1, metadata.start_line)
+    h.eq(3, metadata.end_line)
+  end, debug.traceback)
+
+  vim.api.nvim_set_current_buf(original_bufnr)
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+  if not ok then
+    error(err, 0)
+  end
+end)
+
 h.test("blockwise selection slices every line", function()
   local bufnr = buffer({ "abcdef", "ghijkl" })
   local lines = context._selection_text(bufnr, { 1, 1 }, { 2, 3 }, "\22")
