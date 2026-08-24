@@ -15,7 +15,7 @@ Codex CLI を Neovim から操作し、現在のファイル・選択範囲・ex
 - 外部 command は shell 文字列ではなく argv 配列で起動する。
 - window を閉じても process は維持し、`:CodexStop` だけが明示停止する。
 - panel を内側から隠した時は、直前に使っていた editor window へ戻す。
-- cwd は session 開始元 buffer から一度だけ解決し、実行中に暗黙変更しない。
+- cwd は session 開始元 buffer から一度だけ解決し、実行中に暗黙変更しない。Codex TUI 内で `/cd` されても context の参照先が変わらないよう、terminal backend への `@path` は絶対パスで送る。
 - editor context は行数・byte 数の上限を超えたら切り詰めず拒否する。
 - 直近の context は path・行範囲・cwd・insert/submit の metadata だけを session 中に保持する。
 - explorer 連携は optional adapter とし、runtime dependency を追加しない。

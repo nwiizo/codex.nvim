@@ -9,10 +9,12 @@ end)
 h.test("add_paths sends one composer update and emits normalized context", function()
   codex._reset()
   local sent
+  local project_dir = vim.fn.tempname()
+  vim.fn.mkdir(project_dir, "p")
   local original_terminal = package.loaded["codex.terminal"]
   package.loaded["codex.terminal"] = {
     status = function()
-      return { backend = "terminal", cwd = "/tmp", running = true, visible = false, jobid = 42 }
+      return { backend = "terminal", cwd = project_dir, running = true, visible = false, jobid = 42 }
     end,
     send = function(text, opts)
       sent = { text = text, opts = opts }
@@ -24,33 +26,30 @@ h.test("add_paths sends one composer update and emits normalized context", funct
   }
   config.setup({ cwd = "nvim" })
 
-  local first = vim.fn.tempname()
-  local second = vim.fn.tempname()
+  local first = project_dir .. "/first.lua"
+  local second = project_dir .. "/second.lua"
   vim.fn.writefile({}, first)
   vim.fn.writefile({}, second)
-  local canonical_first = vim.uv.fs_realpath(first)
-  local canonical_second = vim.uv.fs_realpath(second)
-  local expected_first = require("codex.cwd").relative(canonical_first, "/tmp")
-  local expected_second = require("codex.cwd").relative(canonical_second, "/tmp")
+  local expected_first = "first.lua"
+  local expected_second = "second.lua"
   local ok = codex.add_paths({ first, second }, "test")
   local status = codex.status()
 
   package.loaded["codex.terminal"] = original_terminal
-  vim.fn.delete(first)
-  vim.fn.delete(second)
+  vim.fn.delete(project_dir, "rf")
   h.truthy(ok)
-  h.contains(sent.text, "@" .. expected_first)
-  h.contains(sent.text, "@" .. expected_second)
+  h.contains(sent.text, "@" .. first)
+  h.contains(sent.text, "@" .. second)
   h.eq(false, sent.opts.submit)
   local receipt = status.last_context
   h.truthy(receipt)
   h.eq("files", receipt.kind)
   h.eq({ expected_first, expected_second }, receipt.paths)
-  h.eq("/tmp", receipt.cwd)
+  h.eq(project_dir, receipt.cwd)
   h.eq("test", receipt.source)
   h.eq(false, receipt.submitted)
   h.contains(codex.status_message(status), "last context: files")
-  h.contains(codex.status_message(status), "inserted (cwd /tmp)")
+  h.contains(codex.status_message(status), "inserted (cwd " .. project_dir .. ")")
   codex._reset()
 end)
 
@@ -106,13 +105,14 @@ h.test("range sends record a submitted context receipt", function()
   local bufnr = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_name(bufnr, "/tmp/context-receipt.lua")
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "local one = 1", "local two = 2" })
+  local absolute_path = vim.api.nvim_buf_get_name(bufnr)
 
   h.truthy(codex.send_range(1, 2, bufnr))
   local status = codex.status()
 
   package.loaded["codex.terminal"] = original_terminal
   vim.api.nvim_buf_delete(bufnr, { force = true })
-  h.contains(sent, "lines 1-2")
+  h.contains(sent, "@" .. absolute_path .. " (lines 1-2)")
   h.eq(true, sent_opts.submit)
   local receipt = status.last_context
   h.truthy(receipt)
@@ -132,6 +132,7 @@ h.test("add_visual inserts exact selection without submitting", function()
   local ok, err = xpcall(function()
     vim.api.nvim_buf_set_name(bufnr, "/tmp/visual-draft.lua")
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "local one = 1", "local two = 2" })
+    local absolute_path = vim.api.nvim_buf_get_name(bufnr)
     vim.api.nvim_set_current_buf(bufnr)
     vim.cmd("normal! gg06lvj2l")
     vim.api.nvim_feedkeys(vim.keycode("<Esc>"), "nx", false)
@@ -155,6 +156,7 @@ h.test("add_visual inserts exact selection without submitting", function()
 
     h.contains(sent.text, "one = 1")
     h.contains(sent.text, "local two")
+    h.contains(sent.text, "@" .. absolute_path)
     h.eq("\n\n", sent.text:sub(-2))
     h.eq(false, sent.opts.submit)
     local receipt = status.last_context

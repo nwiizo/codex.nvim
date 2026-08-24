@@ -33,6 +33,10 @@ local function working_directory()
   return resolved
 end
 
+local function use_absolute_mentions()
+  return config().backend == "terminal"
+end
+
 ---@param kind "file"|"range"|"visual"
 ---@param metadata CodexNvimContextMetadata|CodexNvimSingleContextReceipt
 local function emit_context(kind, metadata)
@@ -271,7 +275,8 @@ function M.send_range(start_line, end_line, bufnr)
   if not cwd then
     return false
   end
-  local prompt, metadata = require("codex.context").range(bufnr or 0, start_line, end_line, cwd, config().context)
+  local prompt, metadata =
+    require("codex.context").range(bufnr or 0, start_line, end_line, cwd, config().context, use_absolute_mentions())
   return send_context(prompt, metadata, "range", cwd)
 end
 
@@ -282,7 +287,8 @@ function M.send_visual(bufnr)
   if not cwd then
     return false
   end
-  local prompt, metadata = require("codex.context").visual(bufnr or 0, cwd, config().context)
+  local prompt, metadata =
+    require("codex.context").visual(bufnr or 0, cwd, config().context, nil, use_absolute_mentions())
   return send_context(prompt, metadata, "visual", cwd)
 end
 
@@ -293,7 +299,8 @@ function M.add_visual(bufnr)
   if not cwd then
     return false
   end
-  local prompt, metadata = require("codex.context").visual(bufnr or 0, cwd, config().context)
+  local prompt, metadata =
+    require("codex.context").visual(bufnr or 0, cwd, config().context, nil, use_absolute_mentions())
   return send_context(prompt, metadata, "visual", cwd, false)
 end
 
@@ -313,16 +320,18 @@ function M.add_paths(paths, source)
     return false
   end
   local relative_paths = {}
+  local mention_paths = {}
   for _, path in ipairs(paths) do
-    local relative_path, path_or_error = require("codex.context").file(path, 0, cwd)
+    local relative_path, absolute_path_or_error = require("codex.context").file(path, 0, cwd)
     if not relative_path then
-      notify(path_or_error, vim.log.levels.ERROR)
+      notify(absolute_path_or_error, vim.log.levels.ERROR)
       return false
     end
     table.insert(relative_paths, relative_path)
+    table.insert(mention_paths, use_absolute_mentions() and absolute_path_or_error or relative_path)
   end
   local mentions = {}
-  for _, path in ipairs(relative_paths) do
+  for _, path in ipairs(mention_paths) do
     table.insert(mentions, "@" .. path)
   end
   local context_source = source or "command"

@@ -175,8 +175,11 @@ session starts.
 ==============================================================================
 4. Working directory                                            *codex-cwd*
 
-The cwd is resolved from the buffer active when a session starts and remains
-fixed for that session.
+The startup cwd is resolved from the buffer active when a session starts and
+remains fixed in codex.nvim for that session. If the Codex TUI cwd is changed
+with `/cd`, terminal context commands use absolute `@path` references so files
+and selections still point to the intended source. |:CodexStatus| continues to
+show the startup cwd.
 
   "root"   Nearest `root_markers` entry from the active file. Falls back to
            the file directory, then Neovim's cwd.

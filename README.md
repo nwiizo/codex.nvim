@@ -312,8 +312,11 @@ cwd = function(ctx)
 end
 ```
 
-The resolved cwd is fixed for the lifetime of a running session. Stop it before
-restarting from a different file or root.
+The resolved startup cwd is fixed for the lifetime of a running session. Stop
+it before restarting from a different file or root. If you change the Codex TUI
+cwd with `/cd`, terminal context commands use absolute `@path` references so
+files and selections still point to the intended source. `:CodexStatus` keeps
+showing the startup cwd managed by codex.nvim.
 
 ## Backends
 
@@ -382,8 +385,10 @@ Terminal payloads include process/window metadata. Context payloads include
 kind, file path, line numbers when applicable, cwd, and whether the context was
 inserted into the composer or submitted. `:CodexStatus` retains only this
 metadata for the active session, not the selected source text. The `source`
-field identifies the buffer, explorer, range, or visual-selection origin.
-App-server payloads include thread/turn identifiers and event-specific data.
+field identifies the buffer, explorer, range, or visual-selection origin. Paths
+in context events and status remain relative to the startup cwd when possible,
+even though the terminal composer receives absolute references. App-server
+payloads include thread/turn identifiers and event-specific data.
 
 ## Design boundaries
 

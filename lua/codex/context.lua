@@ -4,14 +4,15 @@ local cwd = require("codex.cwd")
 
 ---@param bufnr integer
 ---@param working_directory string
----@return string? path
+---@return string? relative_path
+---@return string? absolute_path
 ---@return string? error
-local function source_path(bufnr, working_directory)
+local function source_paths(bufnr, working_directory)
   local path = vim.api.nvim_buf_get_name(bufnr)
   if path == "" then
-    return nil, "current buffer has no file path"
+    return nil, nil, "current buffer has no file path"
   end
-  return cwd.relative(path, working_directory)
+  return cwd.relative(path, working_directory), cwd.absolute(path)
 end
 
 local function fence_for(text)
@@ -43,13 +44,15 @@ end
 ---@param end_line integer
 ---@param lines string[]
 ---@param limits CodexNvimContextConfig
+---@param absolute_mention? boolean
 ---@return string? prompt
 ---@return CodexNvimContextMetadata|string metadata_or_error
-local function format_selection(bufnr, working_directory, start_line, end_line, lines, limits)
-  local path, path_error = source_path(bufnr, working_directory)
+local function format_selection(bufnr, working_directory, start_line, end_line, lines, limits, absolute_mention)
+  local path, absolute_path, path_error = source_paths(bufnr, working_directory)
   if not path then
     return nil, assert(path_error)
   end
+  local mention_path = absolute_mention and assert(absolute_path) or path
 
   local text = table.concat(lines, "\n")
   local valid, limit_error = check_limits(lines, text, limits)
@@ -61,7 +64,7 @@ local function format_selection(bufnr, working_directory, start_line, end_line, 
   local fence = fence_for(text)
   local prompt = string.format(
     "Use this Neovim selection from @%s (lines %d-%d):\n%s%s\n%s",
-    path,
+    mention_path,
     start_line,
     end_line,
     fence,
@@ -80,9 +83,10 @@ end
 ---@param end_line integer
 ---@param working_directory string
 ---@param limits CodexNvimContextConfig
+---@param absolute_mention? boolean
 ---@return string? prompt
 ---@return CodexNvimContextMetadata|string metadata_or_error
-function M.range(bufnr, start_line, end_line, working_directory, limits)
+function M.range(bufnr, start_line, end_line, working_directory, limits, absolute_mention)
   bufnr = bufnr or 0
   if start_line < 1 or end_line < start_line then
     return nil, "invalid line range"
@@ -92,7 +96,7 @@ function M.range(bufnr, start_line, end_line, working_directory, limits)
     return nil, "line range exceeds the buffer"
   end
   local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
-  return format_selection(bufnr, working_directory, start_line, end_line, lines, limits)
+  return format_selection(bufnr, working_directory, start_line, end_line, lines, limits, absolute_mention)
 end
 
 ---@param column integer
@@ -132,9 +136,10 @@ end
 ---@param working_directory string
 ---@param limits CodexNvimContextConfig
 ---@param mode? string
+---@param absolute_mention? boolean
 ---@return string? prompt
 ---@return CodexNvimContextMetadata|string metadata_or_error
-function M.visual(bufnr, working_directory, limits, mode)
+function M.visual(bufnr, working_directory, limits, mode, absolute_mention)
   bufnr = bufnr or 0
   local start_pos = vim.api.nvim_buf_get_mark(bufnr, "<")
   local end_pos = vim.api.nvim_buf_get_mark(bufnr, ">")
@@ -143,7 +148,7 @@ function M.visual(bufnr, working_directory, limits, mode)
   end
   local lines, start_line, end_line =
     M._selection_text(bufnr, start_pos, end_pos, mode or vim.fn.visualmode(), vim.o.selection == "exclusive")
-  return format_selection(bufnr, working_directory, start_line, end_line, lines, limits)
+  return format_selection(bufnr, working_directory, start_line, end_line, lines, limits, absolute_mention)
 end
 
 ---@param path? string
