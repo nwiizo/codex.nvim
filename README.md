@@ -1,8 +1,8 @@
-# codex.nvim
-
 <p align="center">
+
   <img src="assets/codex-nvim.png" alt="codex.nvim icon" width="180">
 </p>
+# codex.nvim
 
 [![CI](https://github.com/nwiizo/codex.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/nwiizo/codex.nvim/actions/workflows/ci.yml)
 
@@ -137,12 +137,12 @@ keys = {
 
 `CodexFocus` behaves according to where the Codex window is:
 
-| State | Result |
-| --- | --- |
-| Running but hidden | Reopen and focus it |
-| Visible in another window | Move focus to it |
-| Already focused | Hide it without stopping the process |
-| Not running | Start and focus a new session |
+| State                     | Result                               |
+| ------------------------- | ------------------------------------ |
+| Running but hidden        | Reopen and focus it                  |
+| Visible in another window | Move focus to it                     |
+| Already focused           | Hide it without stopping the process |
+| Not running               | Start and focus a new session        |
 
 Prompt and context commands also start the selected backend when it is not
 running. Terminal input stays queued until Codex exposes its composer, so an
@@ -165,29 +165,29 @@ Neovim sends keys typed in terminal mode to Codex, including `Esc`. Use
 
 ## Commands
 
-| Command | Description |
-| --- | --- |
-| `:Codex [args...]` | Toggle the selected backend; start `codex [args...]` when absent |
-| `:CodexOpen [args...]` | Show the selected backend; start Codex when absent |
-| `:CodexClose` | Hide the window without stopping Codex |
-| `:CodexFocus` | Focus a visible/hidden session, or hide it when already focused |
-| `:CodexStop` | Stop the Codex process |
-| `:CodexResume [--all\|session]` | Pick or resume a prior session |
-| `:CodexContinue` | Resume the most recent session |
-| `:CodexFork [--all\|session]` | Pick or fork a prior session |
-| `:CodexReview [--uncommitted\|--base BRANCH\|--commit SHA\|instructions]` | Review a change target |
-| `:CodexImage {path...}` | Start a Codex session/turn with local images |
-| `:CodexPrompt [text]` | Prompt Codex, using `vim.ui.input` when text is omitted |
-| `:[range]CodexSend` | Send complete lines with file and range context |
-| `:'<,'>CodexSendVisual` | Send the exact visual selection |
-| `:'<,'>CodexAddVisual` | Insert the exact visual selection without submitting |
-| `:CodexAdd [path]` | Insert an `@path` reference without submitting |
-| `:[range]CodexTreeAdd` | Insert selected explorer paths without submitting |
-| `:CodexSendText[!] {text}` | Send and submit text; bang only inserts it |
-| `:CodexDiff` | Show the latest app-server diff in a native diff buffer |
-| `:CodexInterrupt` | Interrupt the active app-server turn |
-| `:CodexStatus` | Show backend, process, cwd, and the last context receipt |
-| `:CodexHealth` | Run `:checkhealth codex` |
+| Command                                                                   | Description                                                      |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `:Codex [args...]`                                                        | Toggle the selected backend; start `codex [args...]` when absent |
+| `:CodexOpen [args...]`                                                    | Show the selected backend; start Codex when absent               |
+| `:CodexClose`                                                             | Hide the window without stopping Codex                           |
+| `:CodexFocus`                                                             | Focus a visible/hidden session, or hide it when already focused  |
+| `:CodexStop`                                                              | Stop the Codex process                                           |
+| `:CodexResume [--all\|session]`                                           | Pick or resume a prior session                                   |
+| `:CodexContinue`                                                          | Resume the most recent session                                   |
+| `:CodexFork [--all\|session]`                                             | Pick or fork a prior session                                     |
+| `:CodexReview [--uncommitted\|--base BRANCH\|--commit SHA\|instructions]` | Review a change target                                           |
+| `:CodexImage {path...}`                                                   | Start a Codex session/turn with local images                     |
+| `:CodexPrompt [text]`                                                     | Prompt Codex, using `vim.ui.input` when text is omitted          |
+| `:[range]CodexSend`                                                       | Send complete lines with file and range context                  |
+| `:'<,'>CodexSendVisual`                                                   | Send the exact visual selection                                  |
+| `:'<,'>CodexAddVisual`                                                    | Insert the exact visual selection without submitting             |
+| `:CodexAdd [path]`                                                        | Insert an `@path` reference without submitting                   |
+| `:[range]CodexTreeAdd`                                                    | Insert selected explorer paths without submitting                |
+| `:CodexSendText[!] {text}`                                                | Send and submit text; bang only inserts it                       |
+| `:CodexDiff`                                                              | Show the latest app-server diff in a native diff buffer          |
+| `:CodexInterrupt`                                                         | Interrupt the active app-server turn                             |
+| `:CodexStatus`                                                            | Show backend, process, cwd, and the last context receipt         |
+| `:CodexHealth`                                                            | Run `:checkhealth codex`                                         |
 
 Starting a separate terminal review, image, resume, or fork command does not
 replace an active terminal process. Stop or exit the current session first.
@@ -294,13 +294,13 @@ opening `github.com/nwiizo/codex.nvim/lua/codex/init.lua` in the standalone
 repository starts Codex from `github.com/nwiizo/codex.nvim`. Use `cwd = "file"`
 when the file's own `lua/codex` directory should always win.
 
-| Value | Resolution |
-| --- | --- |
-| `"root"` | Nearest configured root marker from the active file |
-| `"file"` | Active file's directory |
-| `"nvim"` | Neovim's current working directory |
-| `"/fixed/path"` | Explicit directory |
-| `function(ctx)` | Custom directory chosen from buffer context |
+| Value           | Resolution                                          |
+| --------------- | --------------------------------------------------- |
+| `"root"`        | Nearest configured root marker from the active file |
+| `"file"`        | Active file's directory                             |
+| `"nvim"`        | Neovim's current working directory                  |
+| `"/fixed/path"` | Explicit directory                                  |
+| `function(ctx)` | Custom directory chosen from buffer context         |
 
 The callback receives `bufnr`, `file`, `file_dir`, and `nvim_cwd`:
 
@@ -350,13 +350,13 @@ resume/fork pickers.
 Run `:CodexTreeAdd` from a supported explorer buffer. No explorer is installed
 or required by codex.nvim.
 
-| Explorer | Selection behavior |
-| --- | --- |
-| nvim-tree | Marks, then the node under the cursor |
-| neo-tree | Visual range/selection, then the current node |
-| Oil | Visual range or cursor entry |
-| mini.files | Visual range or cursor entry |
-| netrw | Marked files or cursor entry |
+| Explorer      | Selection behavior                                |
+| ------------- | ------------------------------------------------- |
+| nvim-tree     | Marks, then the node under the cursor             |
+| neo-tree      | Visual range/selection, then the current node     |
+| Oil           | Visual range or cursor entry                      |
+| mini.files    | Visual range or cursor entry                      |
+| netrw         | Marked files or cursor entry                      |
 | Snacks picker | Selected items, with the current item as fallback |
 
 Paths are canonicalized, deduplicated, checked for existence, and sent relative
@@ -366,20 +366,20 @@ to the running Codex cwd when possible.
 
 The plugin emits these `User` autocmds. Payloads are available in `event.data`.
 
-| Pattern | When |
-| --- | --- |
-| `CodexStarted` | A terminal process starts |
-| `CodexExited` | A terminal process exits |
-| `CodexOpened` | A hidden terminal becomes visible |
-| `CodexClosed` | A terminal window is hidden |
-| `CodexContextSent` | A file, range, or visual selection is sent |
-| `CodexPathsSent` | One or more explorer/command paths are sent |
-| `CodexAppServerReady` | The app-server initialize handshake completes |
-| `CodexAppServerExited` | The app-server process exits |
-| `CodexThreadStarted` | A new app-server thread starts |
-| `CodexTurnStarted` | An app-server turn starts |
-| `CodexTurnCompleted` | An app-server turn finishes |
-| `CodexDiffUpdated` | The latest app-server turn diff changes |
+| Pattern                | When                                          |
+| ---------------------- | --------------------------------------------- |
+| `CodexStarted`         | A terminal process starts                     |
+| `CodexExited`          | A terminal process exits                      |
+| `CodexOpened`          | A hidden terminal becomes visible             |
+| `CodexClosed`          | A terminal window is hidden                   |
+| `CodexContextSent`     | A file, range, or visual selection is sent    |
+| `CodexPathsSent`       | One or more explorer/command paths are sent   |
+| `CodexAppServerReady`  | The app-server initialize handshake completes |
+| `CodexAppServerExited` | The app-server process exits                  |
+| `CodexThreadStarted`   | A new app-server thread starts                |
+| `CodexTurnStarted`     | An app-server turn starts                     |
+| `CodexTurnCompleted`   | An app-server turn finishes                   |
+| `CodexDiffUpdated`     | The latest app-server turn diff changes       |
 
 Terminal payloads include process/window metadata. Context payloads include
 kind, file path, line numbers when applicable, cwd, and whether the context was
