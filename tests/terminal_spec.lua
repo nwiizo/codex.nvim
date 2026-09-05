@@ -473,6 +473,34 @@ h.test("send waits for the composer when the session was opened first", function
   terminal._reset()
 end)
 
+h.test("send recognizes a rendered composer with a hidden terminal cursor", function()
+  terminal._reset()
+  config.setup({
+    cmd = {
+      "sh",
+      "-c",
+      "printf '\\342\\200\\272 Ask Codex to do anything\\n'; exec sh",
+    },
+    focus_after_send = false,
+    terminal = { auto_insert = false, auto_close = true },
+  })
+  local completed
+
+  h.truthy(terminal.send("draft", {
+    submit = false,
+    on_complete = function(ok)
+      completed = ok
+    end,
+  }))
+  local status = terminal.status()
+  h.truthy(vim.wait(1000, function()
+    local lines = vim.api.nvim_buf_get_lines(status.bufnr, 0, -1, false)
+    return completed == true and table.concat(lines, "\n"):find("draft", 1, true) ~= nil
+  end, 10))
+
+  terminal._reset()
+end)
+
 h.test("queued send fails if the terminal exits before showing a composer", function()
   terminal._reset()
   config.setup({
