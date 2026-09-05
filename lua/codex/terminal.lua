@@ -3,6 +3,7 @@ local M = {}
 local window = require("codex.window")
 
 local composer_cursor_pattern = "\27%[[0-9; ]+ q\27%[%?25h"
+local composer_prompt_pattern = "^%s*›%s+Ask "
 -- Keep enough overlap to match the cursor sequence across stdout chunks.
 local output_tail_length = 32
 local composer_wait_warning_ms = 5000
@@ -24,6 +25,7 @@ local composer_wait_warning_ms = 5000
 ---@field composer_ready boolean
 ---@field waiting_for_composer boolean
 ---@field delivery_scheduled boolean
+---@field readiness_check_scheduled boolean
 ---@field output_tail string
 
 ---@type CodexNvimTerminalState
@@ -40,6 +42,7 @@ local state = {
   composer_ready = false,
   waiting_for_composer = false,
   delivery_scheduled = false,
+  readiness_check_scheduled = false,
   output_tail = "",
 }
 
@@ -262,6 +265,23 @@ local function output_has_composer_cursor(data)
   return output:find(composer_cursor_pattern) ~= nil
 end
 
+---@return boolean
+local function buffer_has_composer_prompt()
+  if not valid_buffer() then
+    return false
+  end
+  local ok, lines = pcall(vim.api.nvim_buf_get_lines, state.bufnr, 0, -1, false)
+  if not ok then
+    return false
+  end
+  for _, line in ipairs(lines) do
+    if line:find(composer_prompt_pattern) then
+      return true
+    end
+  end
+  return false
+end
+
 ---@param jobid integer
 local function schedule_composer_wait_warning(jobid)
   vim.defer_fn(function()
@@ -275,12 +295,8 @@ local function schedule_composer_wait_warning(jobid)
 end
 
 ---@param output_jobid integer
----@param data string[]
-local function handle_output(output_jobid, data)
-  if state.jobid and state.jobid ~= output_jobid then
-    return
-  end
-  if state.composer_ready or not output_has_composer_cursor(data) then
+local function mark_composer_ready(output_jobid)
+  if state.jobid ~= output_jobid or state.composer_ready then
     return
   end
 
@@ -305,6 +321,35 @@ local function handle_output(output_jobid, data)
   end)
 end
 
+---@param output_jobid integer
+---@param data string[]
+local function handle_output(output_jobid, data)
+  if state.jobid and state.jobid ~= output_jobid then
+    return
+  end
+  if state.composer_ready then
+    return
+  end
+  if output_has_composer_cursor(data) then
+    mark_composer_ready(output_jobid)
+    return
+  end
+  if state.readiness_check_scheduled then
+    return
+  end
+
+  -- Recent Codex TUI versions can render the editable composer with a
+  -- software cursor while leaving the terminal cursor hidden. Inspect the
+  -- rendered terminal buffer as a fallback after Neovim applies this output.
+  state.readiness_check_scheduled = true
+  vim.defer_fn(function()
+    state.readiness_check_scheduled = false
+    if state.jobid == output_jobid and not state.composer_ready and buffer_has_composer_prompt() then
+      mark_composer_ready(output_jobid)
+    end
+  end, 10)
+end
+
 local function clear_state()
   local pending_sends = state.pending_sends
   if state.resize_group then
@@ -322,6 +367,7 @@ local function clear_state()
   state.composer_ready = false
   state.waiting_for_composer = false
   state.delivery_scheduled = false
+  state.readiness_check_scheduled = false
   state.output_tail = ""
   for _, pending in ipairs(pending_sends) do
     complete_send(pending.opts, false)
@@ -444,6 +490,7 @@ local function start(opts, pending_send)
   state.composer_ready = false
   state.waiting_for_composer = pending_send ~= nil
   state.delivery_scheduled = false
+  state.readiness_check_scheduled = false
   state.output_tail = ""
   local window_error
   state.winid, window_error = try_open_window(bufnr)
