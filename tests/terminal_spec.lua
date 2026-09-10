@@ -2,7 +2,15 @@ local h = require("tests.harness")
 local config = require("codex.config")
 local terminal = require("codex.terminal")
 
-local ready_shell = { "sh", "-c", "printf '\\033[0 q\\033[?25h'; exec sh" }
+-- A deterministic command loop accepting the same paste framing as the TUI.
+local command_loop = [[
+paste_start=$(printf '\033[200~'); paste_end=$(printf '\033[201~')
+while IFS= read -r line; do
+  line=${line#"$paste_start"}; line=${line%"$paste_end"}
+  eval "$line"
+done
+]]
+local ready_shell = { "sh", "-c", "printf '\\033[0 q\\033[?25h'; " .. command_loop }
 
 local function with_failed_split(callback)
   local original_cmd = vim.cmd
@@ -90,7 +98,65 @@ end)
 
 h.test("terminal wraps multiline input as bracketed paste", function()
   h.eq("hello", terminal._encode("hello"))
+  h.eq("\27[200~hello\27[201~", terminal._encode("hello", true))
   h.eq("\27[200~one\ntwo\27[201~", terminal._encode("one\ntwo"))
+end)
+
+h.test("terminal guidance survives custom winbars and follows terminal input mode", function()
+  terminal._reset()
+  config.setup({ cmd = ready_shell, terminal = { auto_insert = false } })
+  local editor = vim.api.nvim_get_current_win()
+  local original_mode = vim.fn.mode
+  local group = vim.api.nvim_create_augroup("codex_test_custom_winbar", { clear = true })
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = { "CodexStarted", "CodexOpened" },
+    callback = function(event)
+      vim.wo[event.data.winid].winbar = "My actions"
+    end,
+  })
+  local ok, err = xpcall(function()
+    h.truthy(terminal.open())
+    vim.wait(50)
+    local function hint()
+      local winid = terminal.status().winid
+      local winbar = vim.wo[winid].winbar
+      return vim.api.nvim_eval_statusline(winbar, { winid = winid, use_winbar = true, maxwidth = 200 }).str
+    end
+    h.contains(hint(), "Press i")
+    h.contains(hint(), "My actions")
+    -- Terminal input mode needs an attached UI; cover its renderer here, while
+    -- keeping the actual PTY, windows, lifecycle callbacks and winbar evaluation.
+    rawset(vim.fn, "mode", function()
+      return "t"
+    end)
+    local input_hint = hint()
+    rawset(vim.fn, "mode", original_mode)
+    h.contains(input_hint, "Enter to send")
+    h.contains(hint(), "Press i")
+    h.truthy(terminal.hide())
+    h.eq(editor, vim.api.nvim_get_current_win())
+    h.truthy(terminal.show())
+    vim.wait(50)
+    h.contains(hint(), "Press i")
+    local _, copies = hint():gsub("My actions", "")
+    h.eq(1, copies)
+    vim.wo.winbar = "%!'Dynamic actions'"
+    vim.api.nvim_exec_autocmds("WinEnter", { buffer = terminal.status().bufnr })
+    vim.wait(50)
+    h.eq("Dynamic actions", hint())
+    vim.wo.winbar = "My actions"
+    vim.api.nvim_exec_autocmds("WinEnter", { buffer = terminal.status().bufnr })
+    vim.wait(50)
+    vim.api.nvim_set_current_win(editor)
+    h.contains(hint(), "Focus")
+  end, debug.traceback)
+  rawset(vim.fn, "mode", original_mode)
+  vim.api.nvim_del_augroup_by_id(group)
+  terminal._reset()
+  if not ok then
+    error(err, 0)
+  end
 end)
 
 h.test("failed terminal start cleans up its split and state", function()
@@ -431,14 +497,53 @@ h.test("send waits for the composer after starting a session", function()
   h.truthy(status.visible)
   h.eq(editor_win, vim.api.nvim_get_current_win())
   h.eq({}, completed)
+  vim.api.nvim_set_current_win(status.winid)
+  h.contains(terminal._input_hint():lower(), "queued")
+  h.contains(terminal._input_hint(), "setup")
+  vim.api.nvim_set_current_win(editor_win)
   h.eq(nil, table.concat(vim.api.nvim_buf_get_lines(status.bufnr, 0, -1, false), "\n"):find("draft", 1, true))
   h.truthy(vim.wait(1000, function()
     local lines = vim.api.nvim_buf_get_lines(status.bufnr, 0, -1, false)
     return table.concat(lines, "\n"):find("draft-queued", 1, true) ~= nil
   end, 10))
   h.eq({ true, true }, completed)
+  vim.api.nvim_set_current_win(status.winid)
+  h.eq(nil, terminal._input_hint():lower():find("queued", 1, true))
 
   terminal._reset()
+end)
+
+h.test("draft sends retain their cwd and reject a different running session", function()
+  terminal._reset()
+  local directory = vim.fn.tempname()
+  vim.fn.mkdir(directory, "p")
+  directory = assert(vim.uv.fs_realpath(directory))
+  config.setup({ cmd = ready_shell, cwd = "nvim", terminal = { auto_insert = false } })
+  local original_notify = vim.notify
+  rawset(vim, "notify", function() end)
+  local ok, err = xpcall(function()
+    local delivered
+    h.truthy(terminal.send("draft", {
+      cwd = directory,
+      submit = false,
+      on_complete = function(result)
+        delivered = result
+      end,
+    }))
+    h.eq(directory, terminal.status().cwd)
+    h.truthy(vim.wait(1000, function()
+      return delivered ~= nil
+    end, 10))
+    h.eq(true, delivered)
+    h.eq(false, terminal.send("wrong project", { cwd = vim.uv.cwd(), submit = false }))
+    h.eq(directory, terminal.status().cwd)
+  end, debug.traceback)
+  terminal._reset()
+  rawset(vim, "notify", original_notify)
+  vim.fn.delete(directory, "rf")
+  if not ok then
+    error(err, 0)
+  end
 end)
 
 h.test("send waits for the composer when the session was opened first", function()
@@ -471,6 +576,61 @@ h.test("send waits for the composer when the session was opened first", function
   h.eq({ true }, completed)
 
   terminal._reset()
+end)
+
+h.test("send recognizes cursor restoration between its style and visibility sequences", function()
+  terminal._reset()
+  config.setup({
+    cmd = {
+      "sh",
+      "-c",
+      "stty -echo; printf '\\033[0 q\\033[1;1H \\033[0m'; sleep 0.05; printf '\\033[2;3H\\033[?25h'; " .. command_loop,
+    },
+    terminal = { auto_insert = false },
+  })
+  local delivered
+  h.truthy(terminal.send("printf 'INTERLEAVED_OK\\n'", {
+    on_complete = function(ok)
+      delivered = ok
+    end,
+  }))
+  local status = terminal.status()
+  local submitted = vim.wait(1000, function()
+    return table.concat(vim.api.nvim_buf_get_lines(status.bufnr, 0, -1, false), "\n"):find("INTERLEAVED_OK", 1, true)
+      ~= nil
+  end, 10)
+  terminal._reset()
+  h.eq(true, delivered)
+  h.truthy(submitted)
+end)
+
+h.test("submitted sends wait past a loading startup draft that ignores Enter", function()
+  terminal._reset()
+  config.setup({
+    cmd = {
+      "bash",
+      "-c",
+      "stty -echo; printf 'model: loading\\n\\342\\200\\272 Ask Codex to do anything\\n\\033[0 q\\033[?25h'; "
+        .. "IFS= read -r -t 0.2 startup_draft; "
+        .. "printf '\\033[2J\\033[Hmodel: gpt-6-astra\\n\\033[0 q\\033[1;1H\\033[?25h'; "
+        .. command_loop,
+    },
+    terminal = { auto_insert = false },
+  })
+  local delivered
+  h.truthy(terminal.send("printf 'AFTER_STARTUP_OK\\n'", {
+    on_complete = function(ok)
+      delivered = ok
+    end,
+  }))
+  local status = terminal.status()
+  local submitted = vim.wait(1000, function()
+    return table.concat(vim.api.nvim_buf_get_lines(status.bufnr, 0, -1, false), "\n"):find("AFTER_STARTUP_OK", 1, true)
+      ~= nil
+  end, 10)
+  terminal._reset()
+  h.eq(true, delivered)
+  h.truthy(submitted, "startup must not consume Enter without submitting")
 end)
 
 h.test("queued send fails if the terminal exits before showing a composer", function()

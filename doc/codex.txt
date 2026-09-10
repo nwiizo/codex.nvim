@@ -56,6 +56,11 @@ The defaults are equivalent to: >lua
       max_lines = 500,
       max_bytes = 65536,
     },
+    selection = {
+      enabled = true,
+      hint = true,
+      keymaps = { ask = "<leader>aa", edit = "<leader>aE" },
+    },
     app_server = {
       cmd = { "codex", "app-server" },
     },
@@ -86,6 +91,14 @@ Ctrl-/ across terminal encodings: >lua
   }
 <
 These keys retain their existing behavior outside the Codex terminal buffer.
+
+Visual selections show Ask/Edit keys below the final selected line. Change
+`selection.keymaps.ask` and `selection.keymaps.edit` to use other keys (or false
+to disable one). Existing mappings are preserved; conflicting actions are not
+advertised. Set `selection.hint = false` to hide the hint, or
+`selection.enabled = false` to disable both mappings and hints.
+The highlight group is CodexSelectionHint, linked to Comment by default.
+With lazy.nvim, use `event = "VeryLazy"` to load before selecting text.
 
 ==============================================================================
 3. Commands                                                  *codex-commands*
@@ -136,6 +149,61 @@ session starts.
 
                                                         *:CodexPrompt*
 :CodexPrompt [text]    Send a prompt. Uses |vim.ui.input()| when omitted.
+
+                                                        *:CodexAsk*
+:[range]CodexAsk [text]
+                       Compose an editable request with file or line context.
+                       Without a range, include the saved file's absolute path
+                       or a snapshot of a named buffer's unsaved changes.
+                       Reopen an existing draft without replacing its contents.
+
+                                                        *:CodexAskVisual*
+:'<,'>CodexAskVisual [text]
+                       Compose a request with the exact visual selection.
+
+                                                        *:CodexEdit*
+:'<,'>CodexEdit [text] Compose a change request with the exact visual selection.
+                       Uses the selected backend, without an inline patch UI.
+
+                                                        *:CodexFollowUp*
+:CodexFollowUp [text]  Compose a multiline follow-up in the running conversation.
+                       Works from the terminal or a diff without attaching its
+                       buffer text. Files can be attached explicitly with Ctrl-f.
+                       A stopped/replaced process or changed app-server thread
+                       prevents submission and leaves the draft intact. Codex
+                       TUI conversation switches remain under CLI control.
+
+Ask/Edit open a Markdown buffer in Insert mode without starting Codex. Edit
+its instructions and attached context, then use Ctrl-s or :write to submit.
+Ctrl-p adds an Explain, Fix, Add tests, or Refactor instruction. Ctrl-d attaches source
+diagnostics; Ctrl-f attaches a file/directory reference. Delete attachment lines
+to remove them. q in Normal mode or Ctrl-c hides the draft; :CodexAsk reopens it.
+Use :bdelete! in the request buffer to discard it.
+
+                                                        *codex-input*
+Input instructions appear outside the request text and are never sent to Codex:
+  Insert mode:  Type your request. Ctrl-S to send. Enter for a new line.
+  Normal mode:  Press i to start typing. Ctrl-S to send.
+Ctrl-S Send appears above the editable text before attachment shortcuts and
+stays visible when the header is shortened to fit a narrow window. The same
+guidance is available for :CodexFollowUp. In Visual mode, press Esc before i.
+
+The terminal panel has separate guidance because Enter submits there:
+  Terminal input:   Type a message. Enter to send.
+  Terminal Normal:  Press i to start typing.
+Queued requests show a reminder to check Codex setup prompts. Once the composer
+is ready, the queued request is sent automatically. Custom winbar actions are
+preserved after the input instructions.
+Whole-bar %! formatters keep their original winbar without the built-in hint.
+
+The entire request is subject to the context line/byte limits. Its source cwd
+is retained; sending to a different running cwd is rejected. Pending delivery
+locks and hides the draft so Codex is visible, failure reopens it for retry, and
+success removes it. A draft is kept only in memory, without swap or undo files.
+Continue by typing in Codex or composing a :CodexFollowUp. :CodexClose returns
+to editing without stopping the process; :CodexOpen brings the conversation
+back. Use your Git diff integration for saved changes; :CodexDiff shows the
+latest app-server turn's diff only.
 
                                                         *:CodexSend*
 :[range]CodexSend      Send complete lines with file/range context.
@@ -229,6 +297,6 @@ available through `event.data`.
 Context event payloads include `kind`, `file_path`, line numbers when
 applicable, `cwd`, `source`, and `submitted`. Path payloads include `paths`,
 `cwd`, `source`, and `submitted`. The status receipt stores only this metadata
-for the active session; selected source text is never retained.
+for the active session; selected source text is not retained in the receipt.
 
 vim:tw=78:ts=8:noet:ft=help:norl:

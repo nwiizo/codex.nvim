@@ -314,7 +314,23 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
   h.eq(nil, app.status().thread_id)
   h.eq(nil, app.status().cwd)
 
+  -- A request created before focus moved to another project keeps its cwd.
+  local directory = vim.fn.tempname()
+  vim.fn.mkdir(directory, "p")
+  directory = assert(vim.uv.fs_realpath(directory))
+  h.truthy(app.send("request from the original editor", { cwd = directory }))
+  h.eq(directory, app.status().cwd)
+  h.eq(directory, requests[#requests].params.cwd)
+  turn_callback({ turn = { id = "captured-cwd-turn" } })
+  local request_count = #requests
+  original_notify = vim.notify
+  rawset(vim, "notify", function() end)
+  h.eq(false, app.send("wrong project", { cwd = vim.uv.cwd() }))
+  rawset(vim, "notify", original_notify)
+  h.eq(request_count, #requests)
+
   app._reset()
+  vim.fn.delete(directory, "rf")
   package.loaded["codex.app_server"] = nil
   package.loaded["codex.app_server.client"] = original_client
   package.loaded["codex.app_server.ui"] = original_ui

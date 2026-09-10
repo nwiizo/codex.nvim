@@ -32,6 +32,11 @@ local defaults = {
     max_lines = 500,
     max_bytes = 65536,
   },
+  selection = {
+    enabled = true,
+    hint = true,
+    keymaps = { ask = "<leader>aa", edit = "<leader>aE" },
+  },
   app_server = {
     cmd = { "codex", "app-server" },
   },
@@ -205,6 +210,26 @@ local function validate(config)
   end
   validate_positive_integer(config.context.max_lines, "context.max_lines")
   validate_positive_integer(config.context.max_bytes, "context.max_bytes")
+
+  if type(config.selection) ~= "table" then
+    fail("selection", "a table")
+  end
+  for _, key in ipairs({ "enabled", "hint" }) do
+    if type(config.selection[key]) ~= "boolean" then
+      fail("selection." .. key, "a boolean")
+    end
+  end
+  if type(config.selection.keymaps) ~= "table" then
+    fail("selection.keymaps", "a table")
+  end
+  for _, key in ipairs({ "ask", "edit" }) do
+    if config.selection.keymaps[key] ~= false then
+      validate_string(config.selection.keymaps[key], "selection.keymaps." .. key)
+    end
+  end
+  if config.selection.keymaps.ask and config.selection.keymaps.ask == config.selection.keymaps.edit then
+    fail("selection.keymaps", "different keys for Ask and Edit")
+  end
 
   if type(config.app_server) ~= "table" then
     fail("app_server", "a table")

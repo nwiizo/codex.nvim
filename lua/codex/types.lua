@@ -47,6 +47,7 @@
 ---@field focus_after_send? boolean
 ---@field terminal? CodexNvimTerminalOptions
 ---@field context? CodexNvimContextOptions
+---@field selection? { enabled?: boolean, hint?: boolean, keymaps?: { ask?: string|false, edit?: string|false } }
 ---@field app_server? { cmd?: string[] }
 
 ---@class (exact) CodexNvimTerminalFloatConfig
@@ -78,6 +79,7 @@
 ---@field focus_after_send boolean
 ---@field terminal CodexNvimTerminalConfig
 ---@field context CodexNvimContextConfig
+---@field selection { enabled: boolean, hint: boolean, keymaps: { ask: string|false, edit: string|false } }
 ---@field app_server { cmd: string[] }
 
 ---@class (exact) CodexNvimOpenOptions
@@ -94,6 +96,7 @@
 ---@class (exact) CodexNvimSendOptions
 ---@field submit? boolean
 ---@field on_complete? fun(ok: boolean)
+---@field cwd? string Explicit working directory for editor drafts; cannot change a running session.
 
 ---@class (exact) CodexNvimStatus
 ---@field backend CodexNvimBackend

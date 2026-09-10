@@ -2,9 +2,10 @@ local M = {}
 
 local window = require("codex.window")
 
-local composer_cursor_pattern = "\27%[[0-9; ]+ q\27%[%?25h"
--- Keep enough overlap to match the cursor sequence across stdout chunks.
-local output_tail_length = 32
+local composer_cursor_pattern = "\27%[[0-9; ]+ q.-\27%[%?25h"
+-- Codex may restore cells and move the cursor between setting its style and
+-- showing it. Keep overlap for those sequences split across stdout chunks.
+local output_tail_length = 512
 local composer_wait_warning_ms = 5000
 
 ---@class (exact) CodexNvimPendingSend
@@ -22,8 +23,8 @@ local composer_wait_warning_ms = 5000
 ---@field resize_group? integer
 ---@field pending_sends CodexNvimPendingSend[]
 ---@field composer_ready boolean
+---@field startup_draft boolean
 ---@field waiting_for_composer boolean
----@field delivery_scheduled boolean
 ---@field output_tail string
 
 ---@type CodexNvimTerminalState
@@ -38,8 +39,8 @@ local state = {
   resize_group = nil,
   pending_sends = {},
   composer_ready = false,
+  startup_draft = false,
   waiting_for_composer = false,
-  delivery_scheduled = false,
   output_tail = "",
 }
 
@@ -67,6 +68,71 @@ end
 
 local function valid_buffer()
   return state.bufnr ~= nil and vim.api.nvim_buf_is_valid(state.bufnr)
+end
+
+local input_hint_expression = "%{%v:lua.require('codex.terminal')._input_hint()%}"
+
+-- Evaluated by Neovim for the window being drawn, including inactive panels.
+---@return string
+function M._input_hint()
+  local winid = vim.api.nvim_get_current_win()
+  if not valid_buffer() or not vim.api.nvim_win_is_valid(winid) or vim.api.nvim_win_get_buf(winid) ~= state.bufnr then
+    return ""
+  end
+  if not state.jobid then
+    return "Starting Codex..."
+  end
+  local current_winid = tonumber(vim.g.actual_curwin) or vim.api.nvim_get_current_win()
+  if winid ~= current_winid then
+    return "Focus Codex to type."
+  end
+  local mode = vim.fn.mode()
+  local typing = mode:sub(1, 1) == "t"
+  if mode:match("^[vVsS\22\19]") then
+    return "Press Esc, then i to type."
+  end
+  if state.waiting_for_composer then
+    return typing and "Check setup prompts. Queued." or "Press i for setup. Queued."
+  end
+  return typing and "Type a message. Enter to send." or "Press i to start typing."
+end
+
+---@param bufnr integer
+local function setup_input_guidance(bufnr)
+  local function refresh()
+    vim.schedule(function()
+      if state.bufnr ~= bufnr or not valid_buffer() then
+        return
+      end
+      for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
+        local winbar = vim.wo[winid].winbar
+        -- A %! formatter must remain at the beginning of the option.
+        if not vim.startswith(winbar, "%!") and not winbar:find(input_hint_expression, 1, true) then
+          -- Keep actions supplied by user config after the typing instructions.
+          vim.wo[winid].winbar = input_hint_expression .. (winbar ~= "" and (" %<" .. winbar) or "")
+        end
+      end
+      vim.cmd("redrawstatus")
+    end)
+  end
+  vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter", "ModeChanged" }, {
+    buffer = bufnr,
+    callback = refresh,
+  })
+  vim.api.nvim_create_autocmd("BufWinLeave", {
+    buffer = bufnr,
+    callback = function()
+      for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
+        local winbar = vim.wo[winid].winbar
+        if vim.startswith(winbar, input_hint_expression) then
+          local rest = winbar:sub(#input_hint_expression + 1)
+          vim.wo[winid].winbar = vim.startswith(rest, " %<") and rest:sub(4) or rest
+        end
+      end
+      refresh()
+    end,
+  })
+  refresh()
 end
 
 local function find_window()
@@ -257,9 +323,16 @@ end
 local function output_has_composer_cursor(data)
   local output = state.output_tail .. table.concat(data or {}, "\n")
   state.output_tail = output:sub(math.max(1, #output - output_tail_length + 1))
-  -- Codex sets the cursor style and shows it only after rendering an editable
-  -- composer. Startup selectors keep the terminal cursor hidden.
-  return output:find(composer_cursor_pattern) ~= nil
+  local plain = output:gsub("\27%[[0-9;?]*[ -/]*[@-~]", "")
+  -- The startup draft ignores Enter and keeps model: loading even after cwd
+  -- resolves. Track the header from stdout: Neovim refreshes terminal buffer
+  -- lines later, so reading them here can mistake startup for a ready composer.
+  for model in plain:gmatch("model:%s+(%S+)%s") do
+    state.startup_draft = vim.startswith(model, "load")
+  end
+  -- Startup selectors keep the cursor hidden. An editable startup draft also
+  -- shows it, so its loading header must have been replaced first.
+  return not state.startup_draft and output:find(composer_cursor_pattern) ~= nil
 end
 
 ---@param jobid integer
@@ -284,19 +357,17 @@ local function handle_output(output_jobid, data)
     return
   end
 
-  state.composer_ready = true
-  if not state.waiting_for_composer then
-    return
-  end
-  state.waiting_for_composer = false
-  state.delivery_scheduled = true
   vim.schedule(function()
-    if state.jobid ~= output_jobid or not M.is_running() then
+    if state.jobid ~= output_jobid or not M.is_running() or state.composer_ready or state.startup_draft then
       return
     end
+    state.composer_ready = true
+    if not state.waiting_for_composer then
+      return
+    end
+    state.waiting_for_composer = false
     local pending_sends = state.pending_sends
     state.pending_sends = {}
-    state.delivery_scheduled = false
     for _, pending in ipairs(pending_sends) do
       if not send_now(pending.text, pending.opts) then
         complete_send(pending.opts, false)
@@ -320,8 +391,8 @@ local function clear_state()
   state.resize_group = nil
   state.pending_sends = {}
   state.composer_ready = false
+  state.startup_draft = false
   state.waiting_for_composer = false
-  state.delivery_scheduled = false
   state.output_tail = ""
   for _, pending in ipairs(pending_sends) do
     complete_send(pending.opts, false)
@@ -442,8 +513,8 @@ local function start(opts, pending_send)
   state.bufnr = bufnr
   state.pending_sends = pending_send and { pending_send } or {}
   state.composer_ready = false
+  state.startup_draft = false
   state.waiting_for_composer = pending_send ~= nil
-  state.delivery_scheduled = false
   state.output_tail = ""
   local window_error
   state.winid, window_error = try_open_window(bufnr)
@@ -458,6 +529,7 @@ local function start(opts, pending_send)
   setup_window_navigation(bufnr)
   setup_normal_mode_keys(bufnr)
   setup_hide_keys(bufnr)
+  setup_input_guidance(bufnr)
   setup_float_resize(bufnr)
 
   local argv = opts.argv or M._build_argv(opts.subcommand, opts.args)
@@ -573,10 +645,11 @@ function M.stop()
 end
 
 ---@param text string
+---@param force_paste? boolean
 ---@return string
-function M._encode(text)
+function M._encode(text, force_paste)
   text = text:gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("%z", ""):gsub("\27%[201~", "[201~")
-  if text:find("\n", 1, true) then
+  if force_paste or text:find("\n", 1, true) then
     return "\27[200~" .. text .. "\27[201~"
   end
   return text
@@ -590,7 +663,9 @@ send_now = function(text, opts)
   if not channel or channel == 0 then
     channel = valid_buffer() and vim.bo[state.bufnr].channel or state.jobid
   end
-  local payload = M._encode(text)
+  -- Frame submitted single-line text too: Codex's typing-burst detection can
+  -- otherwise consume the following Enter as part of an unbracketed paste.
+  local payload = M._encode(text, opts.submit ~= false)
   if opts.submit ~= false then
     payload = payload .. "\r"
   end
@@ -616,9 +691,16 @@ function M.send(text, opts)
     return false
   end
   if not M.is_running() then
-    return start({ focus = config().focus_after_send }, { text = text, opts = opts })
+    return start({ focus = config().focus_after_send, cwd = opts.cwd }, { text = text, opts = opts })
   end
-  if not state.composer_ready or state.delivery_scheduled then
+  if opts.cwd then
+    local cwd = require("codex.cwd").resolve(0, opts.cwd, config().root_markers)
+    if cwd ~= state.cwd then
+      notify("request cwd differs from the running session; stop it before sending this request", vim.log.levels.WARN)
+      return false
+    end
+  end
+  if not state.composer_ready then
     local started_waiting = not state.composer_ready and not state.waiting_for_composer
     if not state.composer_ready then
       state.waiting_for_composer = true

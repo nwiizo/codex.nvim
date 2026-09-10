@@ -629,6 +629,19 @@ end
 ---@return boolean
 function M.send(text, opts)
   opts = opts or {}
+  local captured_cwd
+  if opts.cwd then
+    local err
+    captured_cwd, err = require("codex.cwd").resolve(0, opts.cwd, require("codex.config").get().root_markers)
+    if not captured_cwd then
+      notify(tostring(err), vim.log.levels.ERROR)
+      return false
+    end
+    if state.cwd_locked and captured_cwd ~= state.cwd then
+      notify("request cwd differs from the running session; stop it before sending this request", vim.log.levels.WARN)
+      return false
+    end
+  end
   if state.thread_switching then
     notify("wait for the thread switch to complete", vim.log.levels.WARN)
     return false
@@ -647,7 +660,10 @@ function M.send(text, opts)
   end
   if opts.submit == false then
     if not state.cwd_locked then
-      local cwd, err = current_cwd()
+      local cwd, err = captured_cwd, nil
+      if not cwd then
+        cwd, err = current_cwd()
+      end
       if not cwd then
         notify(tostring(err), vim.log.levels.ERROR)
         return false
@@ -687,7 +703,7 @@ function M.send(text, opts)
       end
       start_turn({ { type = "text", text = prompt } }, prompt, complete)
     end)
-  end)
+  end, captured_cwd)
   if not started then
     complete(false)
   end

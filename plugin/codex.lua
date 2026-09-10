@@ -12,6 +12,16 @@ local function codex()
   return require("codex")
 end
 
+-- Keep command registration lazy, but make selection actions available on first use.
+vim.api.nvim_create_autocmd("ModeChanged", {
+  group = vim.api.nvim_create_augroup("CodexSelectionBootstrap", { clear = true }),
+  pattern = "*:[vV\22]*",
+  once = true,
+  callback = function()
+    require("codex.selection").setup()
+  end,
+})
+
 vim.api.nvim_create_user_command("Codex", function(opts)
   codex().toggle(opts.fargs)
 end, { nargs = "*", desc = "Toggle the Codex panel" })
@@ -55,6 +65,22 @@ end, { nargs = "+", complete = "file", desc = "Start a Codex turn with images" }
 vim.api.nvim_create_user_command("CodexPrompt", function(opts)
   codex().prompt(opts.args ~= "" and opts.args or nil)
 end, { nargs = "*", desc = "Prompt the active Codex backend" })
+
+vim.api.nvim_create_user_command("CodexAsk", function(opts)
+  codex().ask(opts.args ~= "" and opts.args or nil, opts.range > 0 and opts.line1 or nil, opts.line2)
+end, { nargs = "*", range = true, desc = "Compose a Codex request with file or line context" })
+
+vim.api.nvim_create_user_command("CodexAskVisual", function(opts)
+  codex().ask_visual(opts.args ~= "" and opts.args or nil)
+end, { nargs = "*", range = true, desc = "Compose a Codex request with the exact visual selection" })
+
+vim.api.nvim_create_user_command("CodexFollowUp", function(opts)
+  codex().follow_up(opts.args ~= "" and opts.args or nil)
+end, { nargs = "*", desc = "Compose a follow-up in the running Codex conversation" })
+
+vim.api.nvim_create_user_command("CodexEdit", function(opts)
+  codex().edit(opts.args ~= "" and opts.args or nil)
+end, { nargs = "*", range = true, desc = "Compose a change request for the exact visual selection" })
 
 vim.api.nvim_create_user_command("CodexDiff", function()
   codex().show_diff()

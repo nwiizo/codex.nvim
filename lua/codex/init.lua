@@ -1,6 +1,6 @@
 local M = {}
 
-M.version = "0.0.3"
+M.version = "0.0.4"
 
 local function config()
   return require("codex.config").get()
@@ -463,6 +463,32 @@ function M.prompt(text)
   return true
 end
 
+---@param text? string
+---@param start_line? integer
+---@param end_line? integer
+---@return boolean
+function M.ask(text, start_line, end_line)
+  return require("codex.ask").open({ text = text, start_line = start_line, end_line = end_line })
+end
+
+---@param text? string
+---@return boolean
+function M.follow_up(text)
+  return require("codex.ask").open({ text = text, follow_up = true })
+end
+
+---@param text? string
+---@return boolean
+function M.ask_visual(text)
+  return require("codex.ask").open({ text = text, visual = true })
+end
+
+---@param text? string
+---@return boolean
+function M.edit(text)
+  return M.ask_visual("Make the following change to this code:\n" .. (text or ""))
+end
+
 function M.status()
   local status = backend().status()
   if not status.cwd then
@@ -481,12 +507,16 @@ end
 
 function M._reset()
   receipts().clear()
+  if package.loaded["codex.ask"] then
+    require("codex.ask").reset()
+  end
 end
 
 ---@param opts? CodexNvimSetupOptions
 ---@return table
 function M.setup(opts)
   require("codex.config").setup(opts)
+  require("codex.selection").setup()
   return M
 end
 
