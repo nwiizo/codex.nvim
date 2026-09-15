@@ -6,11 +6,10 @@ local cwd = require("codex.cwd")
 ---@param working_directory string
 ---@return string? relative_path
 ---@return string? absolute_path
----@return string? error
 local function source_paths(bufnr, working_directory)
   local path = vim.api.nvim_buf_get_name(bufnr)
   if path == "" then
-    return nil, nil, "current buffer has no file path"
+    return nil, nil
   end
   return cwd.relative(path, working_directory), cwd.absolute(path)
 end
@@ -48,11 +47,9 @@ end
 ---@return string? prompt
 ---@return CodexNvimContextMetadata|string metadata_or_error
 local function format_selection(bufnr, working_directory, start_line, end_line, lines, limits, absolute_mention)
-  local path, absolute_path, path_error = source_paths(bufnr, working_directory)
-  if not path then
-    return nil, assert(path_error)
-  end
-  local mention_path = absolute_mention and assert(absolute_path) or path
+  local path, absolute_path = source_paths(bufnr, working_directory)
+  local mention_path = absolute_mention and absolute_path or path
+  local source = mention_path and ("@" .. mention_path) or "an unnamed buffer"
 
   local text = table.concat(lines, "\n")
   local valid, limit_error = check_limits(lines, text, limits)
@@ -63,8 +60,8 @@ local function format_selection(bufnr, working_directory, start_line, end_line, 
   local filetype = vim.bo[bufnr].filetype
   local fence = fence_for(text)
   local prompt = string.format(
-    "Use this Neovim selection from @%s (lines %d-%d):\n%s%s\n%s",
-    mention_path,
+    "Use this Neovim selection from %s (lines %d-%d):\n%s%s\n%s",
+    source,
     start_line,
     end_line,
     fence,

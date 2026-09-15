@@ -181,6 +181,53 @@ h.test("add_visual inserts exact selection without submitting", function()
   end
 end)
 
+h.test("add_visual inserts unnamed readonly buffer text without submitting", function()
+  codex._reset()
+  local sent
+  local original_buf = vim.api.nvim_get_current_buf()
+  local original_terminal = package.loaded["codex.terminal"]
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  local ok, err = xpcall(function()
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "mail body", "unselected text" })
+    vim.bo[bufnr].filetype = "mail"
+    vim.bo[bufnr].readonly = true
+    vim.bo[bufnr].modifiable = false
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.cmd("normal! gg0v3l")
+    vim.api.nvim_feedkeys(vim.keycode("<Esc>"), "nx", false)
+
+    package.loaded["codex.terminal"] = {
+      status = function()
+        return { backend = "terminal", cwd = "/tmp", running = true, visible = true, jobid = 46 }
+      end,
+      send = function(text, opts)
+        sent = { text = text, opts = opts }
+        opts.on_complete(true)
+        return true
+      end,
+    }
+    config.setup({ cwd = "nvim" })
+
+    h.truthy(codex.add_visual(bufnr))
+    h.eq("Use this Neovim selection from an unnamed buffer (lines 1-1):\n```mail\nmail\n```\n\n", sent.text)
+    h.eq(false, sent.opts.submit)
+    local status = codex.status()
+    h.eq(nil, status.last_context.file_path)
+    h.eq(false, status.last_context.submitted)
+    h.contains(codex.status_message(status), "visual [No Name]:1-1, inserted (cwd /tmp)")
+    h.eq("", vim.api.nvim_buf_get_name(bufnr))
+    h.eq(false, vim.bo[bufnr].modifiable)
+  end, debug.traceback)
+
+  vim.api.nvim_set_current_buf(original_buf)
+  package.loaded["codex.terminal"] = original_terminal
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+  codex._reset()
+  if not ok then
+    error(err, 0)
+  end
+end)
+
 h.test("failed context delivery does not record a receipt", function()
   codex._reset()
   local completion

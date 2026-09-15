@@ -104,6 +104,10 @@ Send an exact visual selection:
 :'<,'>CodexSendVisual
 ```
 
+Selections and line ranges also work in unnamed buffers, such as stdin mail
+readers. Their text is included directly without an `@path` reference or a
+temporary file. `CodexAdd` still requires a file path.
+
 Add marked or selected explorer entries:
 
 ```vim

@@ -117,7 +117,7 @@
 
 ---@class (exact) CodexNvimContextMetadata
 ---@field kind? "file"|"range"|"visual"
----@field file_path string
+---@field file_path? string Absent for unnamed buffers.
 ---@field start_line? integer
 ---@field end_line? integer
 ---@field cwd? string
@@ -128,7 +128,7 @@
 
 ---@class (exact) CodexNvimSingleContextReceipt
 ---@field kind "file"|"range"|"visual"
----@field file_path string
+---@field file_path? string Absent for unnamed buffers.
 ---@field start_line? integer
 ---@field end_line? integer
 ---@field cwd string
