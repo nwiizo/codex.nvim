@@ -56,6 +56,9 @@ function M.format_context(receipt)
     table.insert(labels, string.format("+%d more", #targets - #labels))
   end
   local target = table.concat(labels, ", ")
+  if receipt.kind ~= "files" and not receipt.file_path then
+    target = "[No Name]"
+  end
   if receipt.start_line and receipt.end_line then
     target = string.format("%s:%d-%d", target, receipt.start_line, receipt.end_line)
   end

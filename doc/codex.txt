@@ -216,6 +216,10 @@ latest app-server turn's diff only.
                        without submitting, so the prompt can be completed in
                        Codex first.
 
+Selections and line ranges from unnamed buffers include the text directly,
+without an @path reference or a temporary file. Context receipts display
+[No Name] for these buffers.
+
                                                         *:CodexAdd*
 :CodexAdd [path]       Insert an @path reference without submitting.
 

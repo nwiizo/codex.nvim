@@ -106,3 +106,39 @@ h.test("file context rejects missing paths", function()
   h.eq(nil, path)
   h.contains(err, "path does not exist")
 end)
+
+h.test("unnamed ranges include text without a file reference", function()
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "mail body", "```quoted fence" })
+  vim.bo[bufnr].filetype = "mail"
+  vim.bo[bufnr].readonly = true
+  vim.bo[bufnr].modifiable = false
+  for _, absolute_mention in ipairs({ false, true }) do
+    local prompt, metadata = context.range(bufnr, 1, 2, "/tmp", limits, absolute_mention)
+    h.eq(
+      "Use this Neovim selection from an unnamed buffer (lines 1-2):\n````mail\nmail body\n```quoted fence\n````",
+      prompt
+    )
+    h.eq(nil, metadata.file_path)
+    h.eq(1, metadata.start_line)
+    h.eq(2, metadata.end_line)
+  end
+  h.eq("", vim.api.nvim_buf_get_name(bufnr))
+  h.eq(false, vim.bo[bufnr].modifiable)
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+end)
+
+h.test("unnamed ranges preserve limits and file-only validation", function()
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "one", "two" })
+  local prompt, err = context.range(bufnr, 1, 2, "/tmp", { max_lines = 1, max_bytes = 100 })
+  h.eq(nil, prompt)
+  h.contains(err, "2 lines")
+  prompt, err = context.range(bufnr, 1, 2, "/tmp", { max_lines = 10, max_bytes = 1 })
+  h.eq(nil, prompt)
+  h.contains(err, "7 bytes")
+  local path, path_error = context.file(nil, bufnr, "/tmp")
+  h.eq(nil, path)
+  h.eq("current buffer has no file path", path_error)
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+end)
