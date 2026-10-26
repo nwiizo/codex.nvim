@@ -3,7 +3,7 @@ local codex = require("codex")
 local config = require("codex.config")
 
 h.test("reports the release version", function()
-  h.eq("0.0.4", codex.version)
+  h.eq("0.0.5", codex.version)
 end)
 
 h.test("add_paths sends one composer update and emits normalized context", function()
@@ -223,3 +223,69 @@ h.test("terminal review preserves options and combines a multiword prompt", func
   h.eq({ "--base", "main" }, codex._terminal_review_args({ "--base", "main" }))
   h.eq({ "focus on safety" }, codex._terminal_review_args({ "focus", "on", "safety" }))
 end)
+
+for _, action in ipairs({ "resume", "fork" }) do
+  for _, backend_name in ipairs({ "terminal", "app_server" }) do
+    h.test(action .. " picker loads older threads on demand", function()
+      local original_app = package.loaded["codex.app_server"]
+      local original_terminal = package.loaded["codex.terminal"]
+      local original_select = vim.ui.select
+      local calls, selected, stopped = {}, nil, 0
+      local ok, err = pcall(function()
+        config.setup({ backend = backend_name })
+        package.loaded["codex.terminal"] = {
+          is_running = function()
+            return false
+          end,
+          open = function(opts)
+            h.eq(action, opts.subcommand)
+            selected = opts.args[1]
+            return true
+          end,
+        }
+        package.loaded["codex.app_server"] = {
+          list_threads = function(callback, all, cursor)
+            table.insert(calls, { all = all, cursor = cursor })
+            if not cursor then
+              callback({ { id = "recent", name = "Recent" } }, nil, "older-page")
+            else
+              callback({ { id = "older", name = "Older" } })
+            end
+            return true
+          end,
+          resume_thread = function(id)
+            selected = id
+          end,
+          fork_thread = function(id)
+            selected = id
+          end,
+          stop = function()
+            stopped = stopped + 1
+          end,
+        }
+        rawset(vim.ui, "select", function(items, opts, callback)
+          if #calls == 1 then
+            h.eq(0, stopped)
+            h.eq(2, #items)
+            h.eq("Load older threads…", opts.format_item(items[2]))
+            callback(items[2])
+          else
+            h.eq("older", items[1].id)
+            callback(items[1])
+          end
+        end)
+        h.truthy(codex[action]({ "--all" }))
+        h.eq({ { all = true }, { all = true, cursor = "older-page" } }, calls)
+        h.eq("older", selected)
+        h.eq(backend_name == "terminal" and 1 or 0, stopped)
+      end)
+      rawset(vim.ui, "select", original_select)
+      package.loaded["codex.app_server"] = original_app
+      package.loaded["codex.terminal"] = original_terminal
+      config.setup({})
+      if not ok then
+        error(err, 0)
+      end
+    end)
+  end
+end

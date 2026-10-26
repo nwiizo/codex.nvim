@@ -168,7 +168,9 @@ Submission hides the request so the Codex panel can show startup, approvals, and
 
 The terminal panel displays **“Type a message. Enter to send.”** while accepting keyboard input. In terminal Normal mode it says **“Press i to start typing.”**; while selecting text it tells you to press Esc first. If a request is waiting for startup, the panel asks you to check any Codex setup prompts and sends the queued request once the composer is ready. Existing custom winbar actions remain after these instructions. Whole-bar `%!` formatters keep control of their winbar and do not receive the built-in hint.
 
-Use `:CodexClose` to return to editing while keeping the process, then `:CodexOpen` to read or continue the conversation. Review saved changes with your Git diff integration; the terminal backend applies edits through Codex and does not stage or revert them automatically. `:CodexDiff` is the app-server backend's latest-turn diff.
+Use `:CodexClose` to return to editing while keeping the process, then `:CodexOpen` to read or continue the conversation. `:CodexDiff` opens a read-only diff: Git changes for the terminal backend, or the latest turn's diff for app-server. The terminal backend applies edits through Codex and does not stage or revert them automatically.
+
+The terminal diff shows unstaged and staged changes in separate sections, including your own edits. It uses the session's startup cwd, or the configured cwd when no session is running, and does not start Codex. Untracked files and unsaved buffer changes are excluded. Save a buffer to include its changes; use your usual Git tools to inspect untracked files. Press `q` to close the diff.
 
 Without a selection, `:CodexAsk` adds the saved file's absolute `@path`, or a snapshot of a named buffer with unsaved changes. Drafts retain their original working directory even after changing files. Both context limits apply to the entire edited request, and oversized requests are rejected without truncation.
 
@@ -209,12 +211,14 @@ Existing mappings are preserved and conflicting actions are omitted from the hin
 | `:CodexAdd [path]` | Insert an `@path` reference without submitting |
 | `:[range]CodexTreeAdd` | Insert selected explorer paths without submitting |
 | `:CodexSendText[!] {text}` | Send and submit text; bang only inserts it |
-| `:CodexDiff` | Show the latest app-server diff in a native diff buffer |
+| `:CodexDiff` | Show tracked Git changes (terminal) or the latest turn's diff (app-server) |
 | `:CodexInterrupt` | Interrupt the active app-server turn |
 | `:CodexStatus` | Show backend, process, cwd, and the last context receipt |
 | `:CodexHealth` | Run `:checkhealth codex` |
 
 Starting a separate terminal review, image, resume, or fork command does not replace an active terminal process. Stop or exit the current session first. When no session ID is supplied, `CodexResume` and `CodexFork` briefly use app-server `thread/list` to provide `vim.ui.select` pickers even with the terminal backend. Supply a session ID to use the terminal CLI directly.
+
+The pickers include CLI, VS Code, and app-server conversations, ordered by recent activity. Choose **Load older threads…** to fetch the next page of up to 50 conversations. The current-directory filter is preserved on each page; `--all` lists conversations across directories.
 
 ## Configuration
 
@@ -344,6 +348,20 @@ opts = { backend = "app_server" }
 
 The app-server backend starts `codex app-server` over stdio JSONL and provides a native Markdown transcript, streamed agent messages, thread pickers, plan and command output, approval and permission prompts through `vim.ui.select`, user input requests, and diff buffers. MCP elicitation can be declined or cancelled; client-defined dynamic tools and external token/attestation providers are not advertised or implemented. The upstream app-server API is experimental and may change. The terminal TUI can still be used if a Codex CLI update changes the protocol; pass explicit session IDs instead of using its app-server-backed resume/fork pickers.
 
+Resolved approval and input requests no longer accept delayed answers, including after a process restart. A custom `vim.ui` picker may remain visible, but its stale callback is ignored. Current servers own non-blocking question lifetimes through `isBlocking` and `serverRequest/resolved`; the older `autoResolutionMs` timeout is used only when `isBlocking` is absent.
+
+### Feature choices compared with claudecode.nvim
+
+Reviewed against [claudecode.nvim](https://github.com/coder/claudecode.nvim) and [Codex CLI updates](https://learn.chatgpt.com/docs/changelog) on 2026-10-27, with the local app-server schema from Codex CLI 0.164.0.
+
+| Workflow | codex.nvim approach |
+| --- | --- |
+| File, selection, explorer, and diagnostics context | Explicit attachments through Add, Ask, and Edit; no continuous transmission of editor contents. |
+| Review edits inside Neovim | `CodexDiff` supports both backends. Claude's editable proposal acceptance relies on its IDE protocol; the terminal Git view does not identify which edits belong to Codex and therefore does not provide accept/revert actions. App-server approval requests retain their existing decision prompts. |
+| Choose models, permissions, or saved prompts | Use the terminal TUI's `/model`, `/permissions`, and `/presets`; no hard-coded model catalog or second permission store. A native app-server model picker remains a possible follow-up using `model/list`. |
+| Continue prior work | Resume/fork pickers include native app-server threads and older pages; FollowUp provides an editable multiline request. |
+| IDE connection and terminal control | Keep the embedded terminal and documented stdio app-server interface. Claude's WebSocket MCP bridge and external-terminal providers are not prerequisites for these workflows. |
+
 ## Explorer integration
 
 Run `:CodexTreeAdd` from a supported explorer buffer. No explorer is installed or required by codex.nvim.
@@ -391,7 +409,7 @@ Terminal payloads include process/window metadata. Context payloads include kind
 
 ```sh
 make test          # headless unit/behavior suite
-make integration   # initialize the installed Codex app-server and list threads
+make integration   # initialize the installed CLI in a temporary home and list threads
 make fmt-check
 make lint
 make check

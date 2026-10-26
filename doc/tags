@@ -1,10 +1,14 @@
 :Codex	codex.txt	/*:Codex*
 :CodexAdd	codex.txt	/*:CodexAdd*
 :CodexAddVisual	codex.txt	/*:CodexAddVisual*
+:CodexAsk	codex.txt	/*:CodexAsk*
+:CodexAskVisual	codex.txt	/*:CodexAskVisual*
 :CodexClose	codex.txt	/*:CodexClose*
 :CodexContinue	codex.txt	/*:CodexContinue*
 :CodexDiff	codex.txt	/*:CodexDiff*
+:CodexEdit	codex.txt	/*:CodexEdit*
 :CodexFocus	codex.txt	/*:CodexFocus*
+:CodexFollowUp	codex.txt	/*:CodexFollowUp*
 :CodexFork	codex.txt	/*:CodexFork*
 :CodexHealth	codex.txt	/*:CodexHealth*
 :CodexImage	codex.txt	/*:CodexImage*
@@ -26,6 +30,7 @@ codex-commands	codex.txt	/*codex-commands*
 codex-contents	codex.txt	/*codex-contents*
 codex-cwd	codex.txt	/*codex-cwd*
 codex-events	codex.txt	/*codex-events*
+codex-input	codex.txt	/*codex-input*
 codex-intro	codex.txt	/*codex-intro*
 codex-setup	codex.txt	/*codex-setup*
 codex.nvim	codex.txt	/*codex.nvim*

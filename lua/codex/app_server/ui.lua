@@ -168,7 +168,8 @@ function M.append(text)
 end
 
 ---@param diff string
-function M.show_diff(diff)
+---@param name? string
+function M.show_diff(diff, name)
   state.return_winid = window.remember(state.return_winid, state.bufnr, state.diff_bufnr)
   if valid_buffer(state.diff_bufnr) then
     pcall(vim.api.nvim_buf_delete, state.diff_bufnr, { force = true })
@@ -179,7 +180,7 @@ function M.show_diff(diff)
   vim.bo[bufnr].bufhidden = "wipe"
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = "diff"
-  vim.api.nvim_buf_set_name(bufnr, "codex://turn-diff")
+  vim.api.nvim_buf_set_name(bufnr, name or "codex://turn-diff")
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(diff, "\n", { plain = true }))
   vim.bo[bufnr].modifiable = false
   local winid, err = try_open_split("botright vsplit", bufnr, false)

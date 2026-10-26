@@ -22,6 +22,7 @@ local state = {
   submitting = false,
   submission_callback = nil,
   submission_token = 0,
+  server_requests = {},
 }
 
 local function notify(message, level)
@@ -277,9 +278,33 @@ local function item_key(thread_id, turn_id, item_id)
   return table.concat({ thread_id, turn_id, item_id }, "\0")
 end
 
+local function clear_server_request(id)
+  local request = state.server_requests[id]
+  state.server_requests[id] = nil
+  if request and request.timer and not request.timer:is_closing() then
+    request.timer:stop()
+    request.timer:close()
+  end
+end
+
+local function clear_server_requests(turn_id)
+  for id, request in pairs(state.server_requests) do
+    if not turn_id or request.turn_id == turn_id then
+      clear_server_request(id)
+    end
+  end
+end
+
 ---@param method string
 ---@param params table
 function M._handle_notification(method, params)
+  if method == "serverRequest/resolved" then
+    local request = state.server_requests[params.requestId]
+    if request and request.thread_id == params.threadId then
+      clear_server_request(params.requestId)
+    end
+    return
+  end
   if not is_current_notification(method, params) then
     return
   end
@@ -316,6 +341,7 @@ function M._handle_notification(method, params)
     end
     ui.append(table.concat(lines, "\n") .. "\n")
   elseif method == "turn/completed" then
+    clear_server_requests(event_turn_id(params) or state.turn_id)
     state.turn_starting = false
     reject_pending_inputs()
     state.active = false
@@ -391,8 +417,8 @@ end
 
 ---@param method string
 ---@param params table
----@param id integer|string
-local function handle_approval(method, params, id)
+---@param respond fun(result: table?, err?: table)
+local function handle_approval(method, params, respond)
   local is_file = method == "item/fileChange/requestApproval"
   local changes
   if is_file then
@@ -445,7 +471,7 @@ local function handle_approval(method, params, id)
   end
   if #choices == 0 then
     notify("app-server supplied no supported approval decisions", vim.log.levels.ERROR)
-    client.respond(id, nil, { code = -32000, message = "No supported approval decisions" })
+    respond(nil, { code = -32000, message = "No supported approval decisions" })
     return
   end
   local subject = params.command or params.reason or (is_file and "Apply file changes?") or "Run command?"
@@ -459,14 +485,14 @@ local function handle_approval(method, params, id)
     end,
   }, function(choice)
     if choice then
-      client.respond(id, { decision = choice.decision })
+      respond({ decision = choice.decision })
       return
     end
     local decision = dismissal_decision(choices)
     if decision then
-      client.respond(id, { decision = decision })
+      respond({ decision = decision })
     else
-      client.respond(id, nil, { code = -32000, message = "Approval prompt dismissed" })
+      respond(nil, { code = -32000, message = "Approval prompt dismissed" })
     end
   end)
 end
@@ -475,17 +501,27 @@ end
 ---@param index integer
 ---@param answers table
 ---@param done fun(answers: table)
-local function ask_question(questions, index, answers, done)
+---@param pending fun(): boolean
+local function ask_question(questions, index, answers, done, pending)
+  if not pending() then
+    return
+  end
   local question = questions[index]
   if not question then
     done(answers)
     return
   end
   local function save(value)
+    if not pending() then
+      return
+    end
     answers[question.id] = { answers = value and value ~= "" and { value } or {} }
-    ask_question(questions, index + 1, answers, done)
+    ask_question(questions, index + 1, answers, done, pending)
   end
   local function input_answer()
+    if not pending() then
+      return
+    end
     local prompt = question.question .. " "
     if question.isSecret then
       local ok, value = pcall(vim.fn.inputsecret, prompt)
@@ -517,8 +553,8 @@ local function ask_question(questions, index, answers, done)
 end
 
 ---@param params table
----@param id integer|string
-local function handle_permissions(params, id)
+---@param respond fun(result: table?, err?: table)
+local function handle_permissions(params, respond)
   ui.append("\n\n### Permission request\n\n```lua\n" .. vim.inspect(params) .. "\n```\n")
   local choices = {
     { label = "Grant for this turn", scope = "turn" },
@@ -531,7 +567,7 @@ local function handle_permissions(params, id)
       return item.label
     end,
   }, function(choice)
-    client.respond(id, {
+    respond({
       permissions = choice and choice.scope and params.permissions or {},
       scope = (choice and choice.scope) or "turn",
     })
@@ -550,38 +586,39 @@ function M._handle_server_request(method, params, id)
     client.respond(id, nil, { code = -32000, message = "Request belongs to an inactive turn" })
     return
   end
-  if method == "item/commandExecution/requestApproval" or method == "item/fileChange/requestApproval" then
-    handle_approval(method, params, id)
-  elseif method == "item/tool/requestUserInput" then
-    local resolved = false
-    local timer
-    local function respond(answers)
-      if resolved then
-        return
-      end
-      resolved = true
-      if timer then
-        pcall(timer.stop, timer)
-        if not timer:is_closing() then
-          timer:close()
-        end
-      end
-      client.respond(id, { answers = answers })
+  clear_server_request(id)
+  local request = { thread_id = params.threadId, turn_id = params.turnId }
+  state.server_requests[id] = request
+  local function pending()
+    return state.server_requests[id] == request
+  end
+  local function respond(result, err)
+    if pending() then
+      clear_server_request(id)
+      client.respond(id, result, err)
     end
-    if type(params.autoResolutionMs) == "number" then
-      timer = vim.defer_fn(function()
-        respond({})
+  end
+  if method == "item/commandExecution/requestApproval" or method == "item/fileChange/requestApproval" then
+    handle_approval(method, params, respond)
+  elseif method == "item/tool/requestUserInput" then
+    -- Current servers own non-blocking request lifetimes. Only older servers
+    -- without isBlocking use the deprecated client-side timeout.
+    if params.isBlocking == nil and type(params.autoResolutionMs) == "number" then
+      request.timer = vim.defer_fn(function()
+        respond({ answers = {} })
       end, params.autoResolutionMs)
     end
-    ask_question(params.questions or {}, 1, {}, respond)
+    ask_question(params.questions or {}, 1, {}, function(answers)
+      respond({ answers = answers })
+    end, pending)
   elseif method == "item/permissions/requestApproval" then
-    handle_permissions(params, id)
+    handle_permissions(params, respond)
   elseif method == "mcpServer/elicitation/request" then
     vim.ui.select({ "decline", "cancel" }, { prompt = params.message or "MCP server requests input" }, function(choice)
-      client.respond(id, { action = choice or "cancel" })
+      respond({ action = choice or "cancel" })
     end)
   else
-    client.respond(id, nil, { code = -32601, message = "Unsupported client request: " .. method })
+    respond(nil, { code = -32601, message = "Unsupported client request: " .. method })
   end
 end
 
@@ -747,18 +784,28 @@ function M.send_images(paths)
   end)
 end
 
----@param callback fun(threads: table[]?, error: table?)
+---@param callback fun(threads: table[]?, error: table?, next_cursor: string?)
 ---@param all? boolean
+---@param cursor? string
 ---@return boolean
-function M.list_threads(callback, all)
+function M.list_threads(callback, all, cursor)
   return ensure_client(function()
-    local params = { limit = 50, sortKey = "recency_at", sortDirection = "desc" }
+    local params = {
+      limit = 50,
+      sortKey = "recency_at",
+      sortDirection = "desc",
+      sourceKinds = { "cli", "vscode", "appServer" },
+      cursor = cursor,
+    }
     if not all then
       params.cwd = state.cwd
     end
-    client.request("thread/list", params, function(result, err)
-      callback(result and result.data or nil, err)
+    local requested = client.request("thread/list", params, function(result, err)
+      callback(result and result.data or nil, err, result and result.nextCursor or nil)
     end)
+    if not requested then
+      callback(nil, { message = "could not request Codex threads" })
+    end
   end)
 end
 
@@ -788,6 +835,7 @@ local function switch_thread(action, thread_id, callback)
         end
         return
       end
+      clear_server_requests()
       state.thread_id = result.thread.id
       state.cwd = result.cwd or state.cwd
       state.turn_id = nil
@@ -914,6 +962,7 @@ end
 
 ---@param exit_code integer
 function M._handle_client_exit(exit_code)
+  clear_server_requests()
   ui.append(string.format("\n\n> App-server exited unexpectedly (code %d).\n", exit_code))
   state.thread_id = nil
   state.turn_id = nil
@@ -934,6 +983,7 @@ end
 
 function M.stop()
   local stopped = client.stop()
+  clear_server_requests()
   finish_submission(false)
   reject_pending_inputs()
   ui.reset()

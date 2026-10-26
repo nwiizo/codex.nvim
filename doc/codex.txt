@@ -131,6 +131,9 @@ session starts.
                        Pickers use app-server thread/list even when the
                        terminal backend is selected. A session ID goes to the
                        terminal CLI directly.
+                       CLI, VS Code, and app-server threads are included.
+                       Select "Load older threads…" to fetch another page of
+                       up to 50 entries while preserving the cwd filter.
 
                                                         *:CodexContinue*
 :CodexContinue         Resume the most recent session.
@@ -202,8 +205,8 @@ locks and hides the draft so Codex is visible, failure reopens it for retry, and
 success removes it. A draft is kept only in memory, without swap or undo files.
 Continue by typing in Codex or composing a :CodexFollowUp. :CodexClose returns
 to editing without stopping the process; :CodexOpen brings the conversation
-back. Use your Git diff integration for saved changes; :CodexDiff shows the
-latest app-server turn's diff only.
+back. :CodexDiff shows tracked Git changes for the terminal backend, or the
+latest app-server turn's diff for app-server.
 
                                                         *:CodexSend*
 :[range]CodexSend      Send complete lines with file/range context.
@@ -227,7 +230,13 @@ latest app-server turn's diff only.
                        Send text. With !, insert without submitting.
 
                                                         *:CodexDiff*
-:CodexDiff             Open the latest app-server diff.
+:CodexDiff             Open a read-only diff. With terminal, show unstaged and
+                       staged Git changes in separate sections, including your
+                       own edits. Use the session startup cwd, or the configured
+                       cwd if stopped; this command does not start Codex.
+                       Untracked files and unsaved buffers are excluded.
+                       With app-server, show the latest turn's diff.
+                       q closes the view; no files are staged or reverted.
 
                                                         *:CodexInterrupt*
 :CodexInterrupt        Interrupt the active app-server turn.
@@ -274,6 +283,10 @@ Enable with `backend = "app_server"`. It starts `codex app-server` over stdio
 JSONL and renders a Markdown transcript, approvals through |vim.ui.select()|,
 plans, command output, and diffs. The upstream app-server API is experimental
 and may change between Codex CLI releases.
+Answers to resolved approvals or questions are ignored, including callbacks
+from a previous process. A custom vim.ui prompt may remain visible after it
+expires. The legacy autoResolutionMs timeout is used only if the server does
+not supply isBlocking.
 
 ==============================================================================
 6. Events                                                      *codex-events*

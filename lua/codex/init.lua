@@ -1,6 +1,6 @@
 local M = {}
 
-M.version = "0.0.4"
+M.version = "0.0.5"
 
 local function config()
   return require("codex.config").get()
@@ -164,18 +164,23 @@ end
 
 ---@param action "resume"|"fork"
 ---@param all? boolean
+---@param cursor? string
 ---@return boolean
-local function pick_thread(action, all)
+local function pick_thread(action, all, cursor)
   local app = require("codex.app_server")
   local terminal_backend = config().backend == "terminal"
-  return app.list_threads(function(threads, err)
-    if err or not threads or #threads == 0 then
+  return app.list_threads(function(threads, err, next_cursor)
+    if err or not threads or (#threads == 0 and not next_cursor) then
       local message = err and (err.message or tostring(err)) or "no Codex threads found"
       notify(message, err and vim.log.levels.ERROR or vim.log.levels.WARN)
       if terminal_backend then
         app.stop()
       end
       return
+    end
+    local more = { name = "Load older threads…" }
+    if next_cursor then
+      table.insert(threads, more)
     end
     vim.ui.select(threads, {
       prompt = action == "resume" and "Resume Codex thread" or "Fork Codex thread",
@@ -185,6 +190,10 @@ local function pick_thread(action, all)
         if terminal_backend then
           app.stop()
         end
+        return
+      end
+      if choice == more then
+        pick_thread(action, all, next_cursor)
         return
       end
       if terminal_backend then
@@ -204,7 +213,7 @@ local function pick_thread(action, all)
         end)
       end
     end)
-  end, all)
+  end, all, cursor)
 end
 
 ---@param args? string[]
@@ -435,8 +444,8 @@ end
 
 function M.show_diff()
   if config().backend ~= "app_server" then
-    notify('native diff is available with backend = "app_server"', vim.log.levels.WARN)
-    return false
+    local cwd = working_directory()
+    return cwd ~= nil and require("codex.diff").open_git(cwd)
   end
   return require("codex.app_server").show_diff()
 end

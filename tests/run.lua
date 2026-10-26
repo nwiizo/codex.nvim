@@ -9,6 +9,8 @@ require("tests.selection_spec")
 require("tests.terminal_spec")
 require("tests.app_server_client_spec")
 require("tests.app_server_ui_spec")
+require("tests.diff_spec")
+require("tests.app_server_requests_spec")
 require("tests.app_server_spec")
 
 require("tests.harness").finish()
